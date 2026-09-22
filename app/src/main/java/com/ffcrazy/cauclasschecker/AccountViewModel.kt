@@ -9,6 +9,7 @@ import com.ffcrazy.cauclasschecker.location.Position
 import com.ffcrazy.cauclasschecker.web.AccountRecord
 import com.ffcrazy.cauclasschecker.web.AccountRepository
 import com.ffcrazy.cauclasschecker.web.CasClient
+import com.ffcrazy.cauclasschecker.web.CheckInReport
 import com.ffcrazy.cauclasschecker.web.LoginResult
 import com.ffcrazy.cauclasschecker.web.SecureAccountFile
 import kotlinx.coroutines.channels.Channel
@@ -21,11 +22,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** 批量签到时，单个账号的结果。 */
+/** 批量签到时，单个账号的结果。[report] 里还带着实际发出去的端点与坐标。 */
 data class CheckInOutcome(
     val username: String,
-    val result: CasClient.CheckInResult,
-)
+    val report: CheckInReport,
+) {
+    val result: CasClient.CheckInResult get() = report.result
+}
 
 /** 批量签到的进度与结果。[done] < [total] 表示还在跑。 */
 data class CheckInProgress(
@@ -206,15 +209,17 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
             val outcomes = mutableListOf<CheckInOutcome>()
 
             for ((index, account) in targets.withIndex()) {
-                val result = if (account.cookies.isEmpty()) {
-                    CasClient.CheckInResult.NoSession("没有可用的会话，需要重新登录")
+                val report = if (account.cookies.isEmpty()) {
+                    CheckInReport(
+                        CasClient.CheckInResult.NoSession("没有可用的会话，需要重新登录"),
+                    )
                 } else {
                     // 现算，保证用的是此刻的时间戳
                     val url = Sign.buildUrl(session.ip, session.ipt, Sign.nowSeconds())
                     client.checkIn(account.cookies, url, position)
                 }
 
-                outcomes += CheckInOutcome(account.username, result)
+                outcomes += CheckInOutcome(account.username, report)
                 _state.update {
                     it.copy(
                         checkIn = CheckInProgress(

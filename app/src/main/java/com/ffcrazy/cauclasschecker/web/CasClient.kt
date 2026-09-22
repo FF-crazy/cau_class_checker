@@ -28,6 +28,22 @@ sealed interface LoginResult {
 }
 
 /**
+ * 一次签到的完整交代：**结果**，加上**实际发出去的东西**。
+ *
+ * 后两项是诊断用的，起因是一个只看结果分辨不出来的情形：
+ * 弹窗说「GPS：116.35…」，教师端后台那一列却是空的，而两次的「结果」
+ * 一模一样 —— 都是「签到成功」。到底是坐标没进提交体、发到了不记坐标的
+ * 端点、还是服务端不收，只有把发出去的原样摆出来才能分辨。
+ */
+data class CheckInReport(
+    val result: CasClient.CheckInResult,
+    /** 第二步实际 POST 到的端点文件名（`reg.php` / `casgeoreg.php`）；没走到第二步时为空。 */
+    val endpoint: String = "",
+    /** 提交体里实际带上的 position 值。 */
+    val positionSent: String = "",
+)
+
+/**
  * 统一身份认证的无头登录 + 签到客户端。
  *
  * ```
@@ -216,7 +232,7 @@ class CasClient {
         cookies: List<StoredCookie>,
         url: String,
         position: String = "",
-    ): CheckInResult =
+    ): CheckInReport =
         withContext(Dispatchers.IO) {
             try {
                 // 两步必须共用同一个罐子：LastVisit 是跟着会话走的
@@ -225,18 +241,23 @@ class CasClient {
                 // ---- 第一步：取登记表单 ----
                 val page = get(http, url)
                 if (page.finalUrl.toHttpUrlOrNull()?.host.equals(CasLogin.CAS_HOST, true)) {
-                    return@withContext CheckInResult.LoginExpired(
-                        "被跳回统一身份认证，这个账号需要重新登录",
+                    return@withContext CheckInReport(
+                        CheckInResult.LoginExpired("被跳回统一身份认证，这个账号需要重新登录"),
                     )
                 }
 
                 val form = RegForm.parse(page.body, page.finalUrl)
-                    ?: return@withContext classifyCheckIn(plainText(page.body))
+                    ?: return@withContext CheckInReport(classifyCheckIn(plainText(page.body)))
+
+                // 表单指向哪个端点本身就是线索：实测两种都出现过，
+                // 而名字里带 geo 的那个（casgeoreg.php）才像是记坐标的
+                val endpoint = form.action.substringBefore('?').substringAfterLast('/')
 
                 // ---- 第二步：原样提交回 action ----
+                val body = buildCheckInBody(form.fields, position)
                 val request = Request.Builder()
                     .url(form.action.toHttpUrl())
-                    .post(buildCheckInBody(form.fields, position))
+                    .post(body)
                     .header("User-Agent", USER_AGENT)
                     // 正常流程是表单页提交过来的，带上来源更像真实请求
                     .header("Referer", url)
@@ -244,14 +265,19 @@ class CasClient {
 
                 http.newCall(request).execute().use { response ->
                     if (response.request.url.host.equals(CasLogin.CAS_HOST, ignoreCase = true)) {
-                        return@use CheckInResult.LoginExpired(
-                            "被跳回统一身份认证，这个账号需要重新登录",
+                        return@use CheckInReport(
+                            CheckInResult.LoginExpired("被跳回统一身份认证，这个账号需要重新登录"),
+                            endpoint = endpoint,
                         )
                     }
-                    classifyCheckIn(plainText(response.body?.string().orEmpty()))
+                    CheckInReport(
+                        classifyCheckIn(plainText(response.body?.string().orEmpty())),
+                        endpoint = endpoint,
+                        positionSent = body.valueOf("position"),
+                    )
                 }
             } catch (e: Exception) {
-                CheckInResult.Network(networkMessage(e))
+                CheckInReport(CheckInResult.Network(networkMessage(e)))
             }
         }
 
@@ -339,6 +365,10 @@ private val NO_FINGERPRINT: String = "0".repeat(32)
  * 代码上看不出问题（两个 `add` 隔了十几行），但线上就会表现成「明明拿到了坐标，
  * 后台那一列却是空的」。所以这里就地替换，绝不追加。
  */
+/** 取提交体里某个参数的值（同名只会有一个，见 [buildCheckInBody]）。 */
+private fun FormBody.valueOf(name: String): String =
+    (0 until size).firstOrNull { name(it) == name }?.let { value(it) }.orEmpty()
+
 internal fun buildCheckInBody(fields: Map<String, String>, position: String): FormBody {
     val builder = FormBody.Builder()
 

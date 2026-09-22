@@ -172,17 +172,34 @@ private fun CheckInResultDialog(progress: CheckInProgress, onDismiss: () -> Unit
                     .heightIn(max = 380.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
-                // GPS 放最上面：教师端后台那一列是不是空的，全看这一行。
+                // GPS 放最上面：教师端后台那一列是不是空的，全看这几行。
                 // 取不到要标红 —— 灰字和坐标长得太像，上一版就是这么被忽略掉的。
-                if (progress.gps.isNotEmpty()) {
-                    Text(
-                        "GPS：${progress.gps}",
-                        fontSize = 12.sp,
-                        fontWeight = if (progress.gpsOk) FontWeight.Normal else FontWeight.Medium,
-                        color = if (progress.gpsOk) Muted else ErrorRed,
-                        lineHeight = 17.sp,
-                        modifier = Modifier.padding(bottom = 8.dp),
-                    )
+                val sent = progress.outcomes.firstOrNull { it.report.endpoint.isNotEmpty() }
+                if (progress.gps.isNotEmpty() || sent != null) {
+                    if (progress.gps.isNotEmpty()) {
+                        Text(
+                            "GPS：${progress.gps}",
+                            fontSize = 12.sp,
+                            fontWeight = if (progress.gpsOk) FontWeight.Normal else FontWeight.Medium,
+                            color = if (progress.gpsOk) Muted else ErrorRed,
+                            lineHeight = 17.sp,
+                        )
+                    }
+                    // 提交到哪个端点、实际带了什么坐标。
+                    // 只报「签到成功」的话，「坐标压根没进提交体」和「服务端不收」
+                    // 这两种情况长得一模一样，没法分辨。
+                    if (sent != null) {
+                        Text(
+                            "提交：${sent.report.endpoint} ｜ position=${
+                                sent.report.positionSent.ifEmpty { "（空）" }
+                            }",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Muted,
+                            lineHeight = 16.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
                     HorizontalDivider(color = Border, thickness = 1.dp)
                     Spacer(Modifier.height(4.dp))
                 }
