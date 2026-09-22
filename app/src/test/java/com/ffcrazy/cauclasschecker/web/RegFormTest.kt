@@ -44,6 +44,32 @@ class RegFormTest {
         </form></body></html>
     """.trimIndent()
 
+    /**
+     * 线上真实页面的形状：**被注释掉的旧表单排在真表单前面**，而且指向旧的 `reg.php`。
+     *
+     * 这正是踩过的那个坑。不删注释就会先匹配到注释里那个，把请求发给旧端点 ——
+     * 签到照样「成功」（身份取自会话，不取自提交体），但教师端后台的 GPS 列永远是空的。
+     */
+    private val pageWithCommentedLegacyForm = """
+        <html><head><title> 登记姓名</title></head><body onload="initrun()">
+        <!--	//<form  action="reg.php?ip=219.225.103.37&ipt=260922174709" method="POST" onsubmit="return checkForm(this)" >
+        -->
+            <div id="form1">
+            <form action="https://class.cau.edu.cn/casgeoreg.php?ip=219.225.103.37&amp;ipt=260922174709&amp;pst=113&amp;pict=1790072747" method="POST" onsubmit="return checkForm(this)">
+                <input id="p_cardid" type="text" name="id" value="2023000000000" readonly="">
+                <input type="text" name="name" value="张三" readonly="">
+                <input type="hidden" id="position" name="position" value="">
+                <input type="hidden" id="browserfp" name="browserfp" value="">
+        <!--
+                <div class="row"><div class="input">
+                    <span>手机</span><br>
+                    <input id="p_tel" type="text" name="tel"/><br>
+                </div></div>
+        -->
+            </form></div>
+        </body></html>
+    """.trimIndent()
+
     /** 没有表单的错误页 —— 服务端在校验不通过时返回的就是这个。 */
     private val errorPage = """
         <html><head><title> 登记姓名</title>
@@ -73,6 +99,27 @@ class RegFormTest {
             "https://class.cau.edu.cn/casgeoreg.php?ip=219.225.103.37&ipt=260922174709&pst=113&pict=1790072747",
             form.action,
         )
+    }
+
+    @Test
+    fun `注释里的旧表单不会被当成提交目标`() {
+        // 回归用例：曾经直接拿正则扫全文，先撞上注释里那个 reg.php，
+        // 于是每次签到都发给旧端点 —— 签到成功，但教师端后台 GPS 那一列一直是空的。
+        val form = RegForm.parse(pageWithCommentedLegacyForm, pageUrl)!!
+        assertTrue(
+            "必须选中真表单 casgeoreg.php，而不是注释里那个 reg.php。实际：${form.action}",
+            form.action.contains("/casgeoreg.php?"),
+        )
+        assertTrue("pst 要带上，实际：${form.action}", form.action.contains("pst=113"))
+        assertTrue("pict 要带上，实际：${form.action}", form.action.contains("pict=1790072747"))
+    }
+
+    @Test
+    fun `注释里的 input 不会进提交体`() {
+        // 手机号那个 input 在注释里，浏览器根本不提交它 —— 我们提交了就和真实请求不一样
+        val fields = RegForm.parse(pageWithCommentedLegacyForm, pageUrl)!!.fields
+        assertFalse("tel 在注释里，不该出现：$fields", fields.containsKey("tel"))
+        assertEquals(listOf("id", "name", "position", "browserfp"), fields.keys.toList())
     }
 
     @Test

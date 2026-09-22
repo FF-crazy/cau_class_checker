@@ -26,6 +26,14 @@ data class RegForm(
 ) {
     companion object {
 
+        /**
+         * 注释、脚本、样式先整块删掉再找表单 —— 见 [parse] 里的说明。
+         *
+         * `(?s)` 让 `.` 跨行；`(?is)` 再加大小写不敏感。
+         */
+        private val COMMENT = Regex("(?s)<!--.*?-->")
+        private val SCRIPT_OR_STYLE = Regex("(?is)<(script|style)\\b[^>]*>.*?</\\1\\s*>")
+
         private val FORM_ACTION = Regex(
             """<form\b[^>]*?\baction\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""",
             RegexOption.IGNORE_CASE,
@@ -45,7 +53,18 @@ data class RegForm(
          * [pageUrl] 是**实际取到这个页面的地址**（跟随跳转之后的），相对 action 靠它补全。
          */
         fun parse(html: String, pageUrl: String): RegForm? {
-            val m = FORM_ACTION.find(html) ?: return null
+            // 先把注释、脚本、样式整块删掉，再找表单。
+            //
+            // 这不是洁癖。签到页上有一段**被注释掉的旧表单**，它排在真表单**前面**，
+            // 而且指向旧的 `reg.php`（不带 pst / pict）。不删注释就会先匹配到它：
+            // 请求发给了旧端点，签到照样「成功」（身份取自会话，不取自提交体），
+            // 但教师端后台的 GPS 那一列永远是空的 —— 旧端点根本不记坐标。
+            //
+            // 同一个坑还坑到了用来验证的浏览器探针：那段 JS 用的是同样天真的正则，
+            // 于是「验证」出了一个错误结论（浏览器也拿到 reg.php）。真表单其实在下面。
+            val clean = html.replace(COMMENT, " ").replace(SCRIPT_OR_STYLE, " ")
+
+            val m = FORM_ACTION.find(clean) ?: return null
             val raw = m.groupValues[1].ifEmpty { m.groupValues[2] }
                 .ifEmpty { m.groupValues[3] }
                 .ifEmpty { return null }
@@ -53,7 +72,7 @@ data class RegForm(
             val action = resolve(unescape(raw), pageUrl) ?: return null
 
             val fields = LinkedHashMap<String, String>()
-            for (input in INPUT_TAG.findAll(html)) {
+            for (input in INPUT_TAG.findAll(clean)) {
                 val attrs = input.groupValues[1]
 
                 // 提交按钮没有 name，但万一有，也别当成字段提交上去
