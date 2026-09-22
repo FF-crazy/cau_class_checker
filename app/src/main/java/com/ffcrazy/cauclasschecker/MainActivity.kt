@@ -42,9 +42,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ffcrazy.cauclasschecker.domain.Sign
 import com.ffcrazy.cauclasschecker.scan.ScanScreen
 import com.ffcrazy.cauclasschecker.ui.AboutScreen
+import com.ffcrazy.cauclasschecker.ui.AccountPromptDialog
 import com.ffcrazy.cauclasschecker.ui.AccountScreen
 import com.ffcrazy.cauclasschecker.ui.AppHeader
 import com.ffcrazy.cauclasschecker.ui.HomeScreen
+import com.ffcrazy.cauclasschecker.ui.hasUsableAccount
 import com.ffcrazy.cauclasschecker.ui.ManualCheckInScreen
 import com.ffcrazy.cauclasschecker.ui.SessionScreen
 import com.ffcrazy.cauclasschecker.ui.theme.CauCheckInTheme
@@ -107,6 +109,19 @@ private fun AppRoot(vm: CheckInViewModel, accountVm: AccountViewModel) {
     LaunchedEffect(vm, accountVm) {
         launch { collectMessages(vm.messages, snackbarHostState) }
         launch { collectMessages(accountVm.messages, snackbarHostState) }
+    }
+
+    // 启动时一个能用的账号都没有就提醒一次（账号全失效也算，见 hasUsableAccount）。
+    // 每次启动只提醒一次 —— 点了「稍后」不该被反复打断。
+    // 用 rememberSaveable：转屏不该重新触发。
+    var accountPromptDone by rememberSaveable { mutableStateOf(false) }
+    var showAccountPrompt by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (!accountPromptDone) {
+            accountPromptDone = true
+            showAccountPrompt = !hasUsableAccount(accountState.accounts)
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -207,6 +222,16 @@ private fun AppRoot(vm: CheckInViewModel, accountVm: AccountViewModel) {
                 .align(Alignment.BottomCenter)
                 .padding(bottom = if (scanning) 16.dp else 96.dp, start = 16.dp, end = 16.dp),
         )
+
+        if (showAccountPrompt) {
+            AccountPromptDialog(
+                onGoToAccounts = {
+                    showAccountPrompt = false
+                    tabIndex = AppTab.ACCOUNT.ordinal
+                },
+                onDismiss = { showAccountPrompt = false },
+            )
+        }
     }
 }
 
