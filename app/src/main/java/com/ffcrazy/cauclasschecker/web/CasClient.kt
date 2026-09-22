@@ -51,14 +51,24 @@ class CasClient(private val cookieJar: PersistentCookieJar) {
             try {
                 val entry = CasLogin.loginUrl()
 
+                // 0) 先清掉 CAS 域的会话凭据 —— 这一步是必须的。
+                //
+                //    登录成功后 CAS 会种下 CASTGC（已认证票据）。带着它再去请求
+                //    登录页时，CAS 会**直接把你送回业务站点**（单点登录的正常行为），
+                //    于是拿到的不是登录表单，而是业务页面，自然解析不出 lt / execution。
+                //
+                //    只清 CAS 域、保留业务站点域，这样「换账号登录失败」不会顺手
+                //    把当前已登录的账号也踢掉。
+                cookieJar.clearHost(CasLogin.CAS_HOST)
+
                 // 1) 取登录页，抓一次性令牌
-                val loginPage = get(entry)
-                val hidden = CasLogin.parseHiddenFields(loginPage)
+                val page = get(entry)
+                val hidden = CasLogin.parseHiddenFields(page.body)
                 val lt = hidden["lt"]
                 val execution = hidden["execution"]
 
                 if (lt.isNullOrEmpty() || execution.isNullOrEmpty()) {
-                    return@withContext LoginResult.Failure(describeUnexpectedPage(loginPage))
+                    return@withContext LoginResult.Failure(describeUnexpectedPage(page))
                 }
 
                 // 2)+3) 构造并提交
@@ -160,24 +170,35 @@ class CasClient(private val cookieJar: PersistentCookieJar) {
      * 0 字节说明请求根本没到服务器；几千字节但没表单，多半是被代理或
      * 校园网认证页拦截了；接近 15KB 才是正常的登录页大小。
      */
-    private fun describeUnexpectedPage(body: String): String {
-        val size = body.length
-        val looksLikeForm = body.contains("<input", ignoreCase = true)
+    private fun describeUnexpectedPage(page: Page): String {
+        val size = page.body.length
+
+        // GET 直接落到了业务站点 —— 说明 CAS 认为我们已认证，没让登录就放行了
+        if (page.finalUrl.contains(CasLogin.SERVICE_HOST, ignoreCase = true)) {
+            return "当前已经是登录状态，CAS 没有要求重新登录。\n" +
+                "如果要换账号，请先「退出登录」再添加。"
+        }
+
+        val looksLikeForm = page.body.contains("<input", ignoreCase = true)
         val detail = when {
             size == 0 -> "服务器返回了空响应（0 字节）"
             !looksLikeForm -> "返回的内容不是登录页（$size 字节，里面没有表单元素）"
             else -> "登录页里找不到 lt / execution（$size 字节）"
         }
-        return "$detail。\n常见原因：手机上开着 VPN / 代理，或校园网需要先认证上网。" +
-            "关掉代理、连上校园网后再试。"
+        return "$detail。\n常见原因：手机上开着 VPN / 代理，或校园网需要先认证上网。"
     }
 
-    private fun get(url: String): String {
+    /** 响应体 + 最终 URL。最终 URL 用来判断有没有被 CAS 直接放行。 */
+    private data class Page(val finalUrl: String, val body: String)
+
+    private fun get(url: String): Page {
         val request = Request.Builder()
             .url(url.toHttpUrl())
             .header("User-Agent", USER_AGENT)
             .build()
-        return client.newCall(request).execute().use { it.body?.string().orEmpty() }
+        return client.newCall(request).execute().use {
+            Page(it.request.url.toString(), it.body?.string().orEmpty())
+        }
     }
 
     private companion object {

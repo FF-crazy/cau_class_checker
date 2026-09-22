@@ -61,6 +61,31 @@ class PersistentCookieJar(private val file: File) : CookieJar {
         }
     }
 
+    /**
+     * 只清掉某个域的 Cookie，其它域不动。
+     *
+     * 用途：**发起一次新登录之前，必须先清掉 CAS 域的会话凭据**。
+     * 带着上次登录留下的 `CASTGC`（CAS 的已认证票据）去请求登录页时，
+     * CAS 会直接把你送回业务站点 —— 单点登录本就是这个行为 ——
+     * 于是拿到的是业务页面而不是登录表单，自然解析不出 `lt` / `execution`。
+     *
+     * 只清 CAS 域而保留业务站点域，是为了让「换个账号登录失败」不至于
+     * 顺手把当前已登录的账号也踢掉。
+     */
+    fun clearHost(host: String): Boolean = synchronized(lock) {
+        val before = store.size
+        store.keys.removeAll { key ->
+            val domain = key.substringBefore('|').removePrefix(".")
+            domain.equals(host, ignoreCase = true) || domain.endsWith(".$host", ignoreCase = true)
+        }
+        if (store.size != before) {
+            persist()
+            true
+        } else {
+            false
+        }
+    }
+
     /** 是否持有某个域的未过期 Cookie。用来判断「看起来登录过」。 */
     fun hasCookiesFor(host: String): Boolean = synchronized(lock) {
         purgeExpired()
