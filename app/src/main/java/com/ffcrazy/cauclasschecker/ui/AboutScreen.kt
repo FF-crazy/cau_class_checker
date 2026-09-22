@@ -7,7 +7,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -169,7 +168,8 @@ private fun RowDivider() {
 /**
  * 用户协议浮层。
  *
- * 文案还没定，正文先留空 —— 但给足高度，否则弹窗会缩成一条显得像坏了。
+ * 正文就是启动时那个免责声明 —— 同一个 [DISCLAIMER_TEXT]、同一套排版，
+ * 用户在哪儿点开看到的都是同一段话。
  */
 @Composable
 private fun UserAgreementDialog(onDismiss: () -> Unit) {
@@ -180,13 +180,7 @@ private fun UserAgreementDialog(onDismiss: () -> Unit) {
         title = {
             Text("用户协议", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink)
         },
-        text = {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(220.dp),
-            )
-        },
+        text = { DisclaimerBody() },
         confirmButton = {
             TextButton(onClick = onDismiss) {
                 Text("关闭", color = GreenDeep, fontWeight = FontWeight.Medium)

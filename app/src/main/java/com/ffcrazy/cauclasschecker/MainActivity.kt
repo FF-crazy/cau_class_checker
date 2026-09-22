@@ -45,6 +45,7 @@ import com.ffcrazy.cauclasschecker.ui.AboutScreen
 import com.ffcrazy.cauclasschecker.ui.AccountPromptDialog
 import com.ffcrazy.cauclasschecker.ui.AccountScreen
 import com.ffcrazy.cauclasschecker.ui.AppHeader
+import com.ffcrazy.cauclasschecker.ui.DisclaimerDialog
 import com.ffcrazy.cauclasschecker.ui.HomeScreen
 import com.ffcrazy.cauclasschecker.ui.hasUsableAccount
 import com.ffcrazy.cauclasschecker.ui.ManualCheckInScreen
@@ -111,14 +112,22 @@ private fun AppRoot(vm: CheckInViewModel, accountVm: AccountViewModel) {
         launch { collectMessages(accountVm.messages, snackbarHostState) }
     }
 
+    // 免责声明：**每次打开软件都要过一遍**，不是只有第一次。
+    // 靠的是它不落盘 —— 没有 SharedPreferences / DataStore，状态只活在这一次进程里，
+    // 也就没有「同意过一次就永久放行」这回事。
+    // 用 rememberSaveable 而不是 remember：转屏是同一场会话，不该再弹一次。
+    var disclaimerAccepted by rememberSaveable { mutableStateOf(false) }
+
     // 启动时一个能用的账号都没有就提醒一次（账号全失效也算，见 hasUsableAccount）。
     // 每次启动只提醒一次 —— 点了「稍后」不该被反复打断。
     // 用 rememberSaveable：转屏不该重新触发。
     var accountPromptDone by rememberSaveable { mutableStateOf(false) }
     var showAccountPrompt by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        if (!accountPromptDone) {
+    // 挂在 disclaimerAccepted 上，而不是 Unit：声明没过之前先不弹账号提示，
+    // 否则两个框同时立起来，用户点完「同意」脸上又冒出一个框，像是出了 bug。
+    LaunchedEffect(disclaimerAccepted) {
+        if (disclaimerAccepted && !accountPromptDone) {
             accountPromptDone = true
             showAccountPrompt = !hasUsableAccount(accountState.accounts)
         }
@@ -231,6 +240,12 @@ private fun AppRoot(vm: CheckInViewModel, accountVm: AccountViewModel) {
                 },
                 onDismiss = { showAccountPrompt = false },
             )
+        }
+
+        // 免责声明压在**所有**东西上面 —— 含扫码全屏页和手动签到覆盖层，
+        // 所以它排在 Box 的最后一层。
+        if (!disclaimerAccepted) {
+            DisclaimerDialog(onAgree = { disclaimerAccepted = true })
         }
     }
 }
