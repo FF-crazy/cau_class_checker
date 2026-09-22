@@ -12,6 +12,12 @@ val GreenTint = Color(0xFFE8F5E9)    // 极淡绿，用作轻微底色
 val Bg = Color(0xFFF6F7F6)           // 页面背景
 val Ink = Color(0xFF212121)          // 正文
 val Muted = Color(0xFF757575)        // 次要文字
+
+// 失效账号的「灰化」配色。整张卡片连同文字一起褪色，
+// 与有效账号的绿色描边形成明确对照。
+val DisabledBg = Color(0xFFF0F1F0)   // 失效卡片底色
+val DisabledInk = Color(0xFF9AA09A)  // 失效卡片的主文字
+val DisabledSub = Color(0xFFB4B8B4)  // 失效卡片的次要文字
 val Border = Color(0xFFE2E4E2)       // 分隔线 / 描边
 val BoxBg = Color(0xFFF2F3F2)        // URL、元信息底色
 val ErrorRed = Color(0xFFD32F2F)

@@ -6,8 +6,6 @@ import org.junit.Test
 
 class AccountListTest {
 
-    private fun acc(name: String, at: Long) = StoredAccount(name, at)
-
     // ------------------------------------------------------- 同一账号后覆盖前
 
     @Test
@@ -98,4 +96,77 @@ class AccountListTest {
         assertEquals("", AccountList.serialize(emptyList()))
         assertTrue(AccountList.parse("").isEmpty())
     }
+
+    // ------------------------------------------------------------ 有效性标记
+
+    @Test
+    fun `newly upserted account is valid`() {
+        val list = AccountList.upsert(emptyList(), "A", 1000)
+        assertTrue("刚登录成功应为有效", list.single().valid)
+    }
+
+    @Test
+    fun `logging in as one account invalidates the others`() {
+        var list = emptyList<StoredAccount>()
+        list = AccountList.upsert(list, "A", 1000)
+        list = AccountList.upsert(list, "B", 2000)
+
+        // 服务端只有一条会话，B 登录成功意味着 A 那条被顶掉了
+        list = AccountList.invalidateAllExcept(list, "B")
+
+        assertEquals(2, list.size)
+        assertTrue("B 应有效", list.first { it.username == "B" }.valid)
+        assertTrue("A 应失效", !list.first { it.username == "A" }.valid)
+    }
+
+    @Test
+    fun `invalidateAllExcept marks exactly one account valid`() {
+        val list = listOf(acc("A", 1), acc("B", 2), acc("C", 3))
+        val after = AccountList.invalidateAllExcept(list, "B")
+        assertEquals(1, after.count { it.valid })
+        assertEquals("B", after.first { it.valid }.username)
+    }
+
+    @Test
+    fun `withValidity only touches the named account and keeps order`() {
+        val list = listOf(acc("A", 3), acc("B", 2), acc("C", 1))
+        val after = AccountList.withValidity(list, "B", false)
+
+        assertEquals(listOf("A", "B", "C"), after.map { it.username })
+        assertTrue(after.first { it.username == "A" }.valid)
+        assertTrue("B 应被改成失效", !after.first { it.username == "B" }.valid)
+        assertTrue(after.first { it.username == "C" }.valid)
+    }
+
+    @Test
+    fun `withValidity on an unknown account changes nothing`() {
+        val list = listOf(acc("A", 1))
+        assertEquals(list, AccountList.withValidity(list, "ZZZ", false))
+    }
+
+    @Test
+    fun `validity survives the serialize round trip`() {
+        val list = listOf(acc("A", 2, valid = true), acc("B", 1, valid = false))
+        assertEquals(list, AccountList.parse(AccountList.serialize(list)))
+    }
+
+    @Test
+    fun `old two-field entries load as invalid rather than guessing`() {
+        // 第三段是后加的。老数据没有有效性信息，宁可保守判失效 ——
+        // 真实状态由 App 启动时的会话检查重新判定。
+        val parsed = AccountList.parse("A\t1000\nB\t2000")
+        assertEquals(2, parsed.size)
+        assertTrue("老格式应默认失效", parsed.all { !it.valid })
+    }
+
+    @Test
+    fun `malformed validity flag is treated as invalid`() {
+        assertTrue(!AccountList.parse("A\t1\tx").single().valid)
+        assertTrue(!AccountList.parse("A\t1\t").single().valid)
+        assertTrue(!AccountList.parse("A\t1\ttrue").single().valid)
+        assertTrue(AccountList.parse("A\t1\t1").single().valid)
+    }
+
+    private fun acc(name: String, at: Long, valid: Boolean = true) =
+        StoredAccount(name, at, valid)
 }

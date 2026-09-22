@@ -3,6 +3,7 @@ package com.ffcrazy.cauclasschecker
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.ffcrazy.cauclasschecker.web.AccountList
 import com.ffcrazy.cauclasschecker.web.AccountStore
 import com.ffcrazy.cauclasschecker.web.CasClient
 import com.ffcrazy.cauclasschecker.web.LoginResult
@@ -19,9 +20,9 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 data class AccountUiState(
-    /** 登录过的账号，按最近登录时间倒序。 */
+    /** 登录过的账号，按最近登录时间倒序。每条的 [StoredAccount.valid] 决定界面样式。 */
     val accounts: List<StoredAccount> = emptyList(),
-    /** 当前处于登录态的账号；null 表示没有。 */
+    /** 当前持有会话的账号；null 表示没有。 */
     val activeUser: String? = null,
     val busy: Boolean = false,
     /** true 表示正在二级登录页。 */
@@ -36,8 +37,10 @@ data class AccountUiState(
  * ## 为什么是「账号清单」而不是「多账号同时在线」
  * `class.cau.edu.cn` 只有一个 `PHPSESSID`，服务端对同一客户端只维持一条会话 ——
  * 任何时刻只可能有一个账号处于登录态。加上我们不保存密码，切换到另一个账号
- * 必然要重新输入。所以这份清单的定位是：**记住用过哪些账号、当前是哪个、
- * 方便一键回到某个账号**。
+ * 必然要重新输入。
+ *
+ * 所以清单里的 [StoredAccount.valid] 本质上是「**这个账号现在有没有可用会话**」：
+ * 新登录的账号是有效的，之前那个会被标成已失效（它的会话确实被顶掉了）。
  */
 class AccountViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -45,13 +48,7 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
     private val cookieJar = PersistentCookieJar(File(app.filesDir, COOKIE_FILE))
     private val client = CasClient(cookieJar)
 
-    private val _state = MutableStateFlow(
-        AccountUiState(
-            accounts = emptyList(),
-            // 记着上次登录的账号，但只有会话 Cookie 还在才算数
-            activeUser = null,
-        ),
-    )
+    private val _state = MutableStateFlow(AccountUiState())
     val state: StateFlow<AccountUiState> = _state.asStateFlow()
 
     private val _messages = Channel<UiMessage>(Channel.BUFFERED)
@@ -59,13 +56,23 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         val remembered = store.activeUser
-        val stillValid = remembered != null && client.looksLoggedIn()
-        if (remembered != null && !stillValid) {
-            // Cookie 没了（被清掉或过期），登录态不成立，但账号仍留在清单里
+        // 只检查本地 Cookie 还在不在 —— 服务端认不认要等「验活」才知道，
+        // 启动时不该为了这个多发一次网络请求。
+        val hasSession = remembered != null && client.looksLoggedIn()
+        if (remembered != null && !hasSession) {
             store.activeUser = null
         }
+
+        val saved = store.load()
+        val accounts = if (hasSession) {
+            AccountList.invalidateAllExcept(saved, remembered!!)
+        } else {
+            // 本地没有会话，那么所有账号都不可能是有效的
+            saved.map { it.copy(valid = false) }
+        }
+        store.save(accounts)
         _state.update {
-            it.copy(accounts = store.load(), activeUser = remembered.takeIf { stillValid })
+            it.copy(accounts = accounts, activeUser = if (hasSession) remembered else null)
         }
     }
 
@@ -80,7 +87,7 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(onLoginScreen = false, prefillUsername = "") }
     }
 
-    // ------------------------------------------------------------------ 登录 / 退出
+    // ------------------------------------------------------------------ 登录
 
     fun login(username: String, password: String) {
         if (_state.value.busy) return
@@ -94,12 +101,16 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             when (val result = client.login(name, password)) {
                 is LoginResult.Success -> {
-                    // 同一账号后覆盖前：upsert 会顶掉旧条目并刷新时间，不会重复
-                    val updated = store.upsert(result.username, System.currentTimeMillis())
+                    // 同一账号后覆盖前；服务端只有一条会话，
+                    // 所以其余账号的会话确实被顶掉了，标记为失效是事实而非猜测
+                    val upserted = store.upsert(result.username, System.currentTimeMillis())
+                    val accounts = AccountList.invalidateAllExcept(upserted, result.username)
+                    store.save(accounts)
                     store.activeUser = result.username
+
                     _state.update {
                         it.copy(
-                            accounts = updated,
+                            accounts = accounts,
                             activeUser = result.username,
                             busy = false,
                             onLoginScreen = false,
@@ -118,37 +129,38 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun logout() {
-        client.logout()
-        store.activeUser = null
-        // 只清登录态，不清账号清单 —— 下次还能一键回来
-        _state.update { it.copy(activeUser = null) }
-        showMessage("已退出登录")
-    }
+    // ------------------------------------------------------------------ 验活
 
     /**
-     * 验活：探测这个账号的登录态是否还有效。
+     * 验活：确认这个账号的 Cookie 还有没有效。
      *
-     * ⚠️ 服务端对同一客户端只维持**一条**会话，所以只有当前登录的那个账号
-     * 才谈得上"验活"。对其它账号，验活等于「先登录它」—— 而那需要密码，
-     * 我们不存密码，所以只能如实告知。
+     * 只有持有会话的那个账号才谈得上验活 —— 服务端一次只维持一条会话，
+     * 其它账号本来就没有会话可用。对它们直接判失效，而不是拿当前会话的
+     * 探测结果去张冠李戴。
      */
     fun verify(username: String) {
         if (username != _state.value.activeUser) {
-            showMessage("$username 当前未登录。服务端一次只维持一条会话，验活需要先登录该账号。", long = true)
+            setValidity(username, false)
+            showMessage(
+                "$username 没有可用会话（服务端一次只维持一条），已标记为失效",
+                long = true,
+            )
             return
         }
+
         viewModelScope.launch {
             when (val probe = client.probeSession()) {
-                is CasClient.SessionProbe.Alive ->
-                    showMessage("$username 的登录态仍然有效")
+                is CasClient.SessionProbe.Alive -> {
+                    setValidity(username, true)
+                    showMessage("$username 的 Cookie 仍然有效")
+                }
 
                 is CasClient.SessionProbe.Expired -> {
-                    // 服务端已经不认了，把本地状态对齐
+                    setValidity(username, false)
                     client.logout()
                     store.activeUser = null
                     _state.update { it.copy(activeUser = null) }
-                    showMessage("$username 的登录态已过期，需要重新登录", long = true)
+                    showMessage("$username 的 Cookie 已失效，需要重新登录", long = true)
                 }
 
                 is CasClient.SessionProbe.Unknown ->
@@ -157,16 +169,33 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun setValidity(username: String, valid: Boolean) {
+        val accounts = AccountList.withValidity(_state.value.accounts, username, valid)
+        store.save(accounts)
+        _state.update { it.copy(accounts = accounts) }
+    }
+
+    // ------------------------------------------------------------------ 退出 / 删除
+
+    fun logout() {
+        client.logout()
+        store.activeUser = null
+        val accounts = _state.value.accounts.map { it.copy(valid = false) }
+        store.save(accounts)
+        _state.update { it.copy(activeUser = null, accounts = accounts) }
+        showMessage("已退出登录")
+    }
+
     /** 从清单里删掉一个账号。 */
     fun removeAccount(username: String) {
-        val updated = store.remove(username)
         val wasActive = _state.value.activeUser == username
         if (wasActive) {
             client.logout()
             store.activeUser = null
         }
+        val accounts = store.remove(username)
         _state.update {
-            it.copy(accounts = updated, activeUser = if (wasActive) null else it.activeUser)
+            it.copy(accounts = accounts, activeUser = if (wasActive) null else it.activeUser)
         }
         showMessage("已删除账号 $username")
     }

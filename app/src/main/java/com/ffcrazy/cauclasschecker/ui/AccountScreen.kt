@@ -62,6 +62,9 @@ import androidx.compose.ui.unit.sp
 import com.ffcrazy.cauclasschecker.AccountUiState
 import com.ffcrazy.cauclasschecker.AccountViewModel
 import com.ffcrazy.cauclasschecker.ui.theme.Border
+import com.ffcrazy.cauclasschecker.ui.theme.DisabledBg
+import com.ffcrazy.cauclasschecker.ui.theme.DisabledInk
+import com.ffcrazy.cauclasschecker.ui.theme.DisabledSub
 import com.ffcrazy.cauclasschecker.ui.theme.ErrorRed
 import com.ffcrazy.cauclasschecker.ui.theme.Green
 import com.ffcrazy.cauclasschecker.ui.theme.GreenDeep
@@ -225,33 +228,57 @@ private fun EmptyHint() {
     }
 }
 
+/**
+ * 账号卡片。两种状态：
+ *
+ * - **有效**（刚登录成功、或验活通过）：白底 + 绿色描边
+ * - **失效**（Cookie 被顶掉或过期）：整卡灰化、文字一并变灰，右侧标「已失效」
+ */
 @Composable
 private fun AccountCard(account: StoredAccount, onClick: () -> Unit) {
+    val valid = account.valid
+
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(
+            containerColor = if (valid) Color.White else DisabledBg,
+        ),
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, Border, RoundedCornerShape(12.dp)),
+            .border(
+                width = if (valid) 1.5.dp else 1.dp,
+                color = if (valid) Green else Border,
+                shape = RoundedCornerShape(12.dp),
+            ),
     ) {
-        Column(
+        Row(
             Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onClick)
                 .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                account.username,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Ink,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "上次登录 ${formatTime(account.loginAt)}",
-                fontSize = 12.sp,
-                color = Muted,
-            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    account.username,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (valid) Ink else DisabledInk,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "上次登录 ${formatTime(account.loginAt)}",
+                    fontSize = 12.sp,
+                    color = if (valid) Muted else DisabledSub,
+                )
+            }
+            if (!valid) {
+                Text(
+                    "已失效",
+                    fontSize = 13.sp,
+                    color = DisabledInk,
+                )
+            }
         }
     }
 }

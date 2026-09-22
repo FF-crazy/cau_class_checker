@@ -7,6 +7,13 @@ data class StoredAccount(
     val username: String,
     /** 上次登录成功的时刻（毫秒）。 */
     val loginAt: Long,
+    /**
+     * 会话是否验证有效。
+     *
+     * 刚登录成功时为 true；「验活」探到服务端不认了、或这条会话被别的账号
+     * 顶掉之后为 false。界面据此决定是绿色描边还是灰化 + 「已失效」。
+     */
+    val valid: Boolean = true,
 )
 
 /**
@@ -28,32 +35,53 @@ object AccountList {
      * 同一账号只会留一条（时间刷新、位置提到最前），不会堆积重复条目。
      */
     fun upsert(accounts: List<StoredAccount>, username: String, at: Long): List<StoredAccount> =
-        sorted(accounts.filterNot { it.username == username } + StoredAccount(username, at))
+        sorted(accounts.filterNot { it.username == username } + StoredAccount(username, at, valid = true))
 
     fun remove(accounts: List<StoredAccount>, username: String): List<StoredAccount> =
         accounts.filterNot { it.username == username }
 
+    /** 只改某个账号的有效标记，其余原样返回。 */
+    fun withValidity(accounts: List<StoredAccount>, username: String, valid: Boolean): List<StoredAccount> =
+        accounts.map { if (it.username == username) it.copy(valid = valid) else it }
+
     /**
-     * 序列化成一行一条 `用户名\t登录时间`。
+     * 把 [keepUsername] 之外的账号全部标记为失效。
      *
-     * 用户名是学号/工号，不会含制表符；解析用 `lastIndexOf('\t')`，
+     * 服务端对同一客户端只维持**一条**会话，所以一个账号登录成功就意味着
+     * 之前那条被顶掉了 —— 这是事实，界面上不该继续显示成绿色。
+     */
+    fun invalidateAllExcept(accounts: List<StoredAccount>, keepUsername: String): List<StoredAccount> =
+        accounts.map { if (it.username == keepUsername) it.copy(valid = true) else it.copy(valid = false) }
+
+    /**
+     * 序列化成一行一条 `用户名\t登录时间\t是否有效`。
+     *
+     * 用户名是学号/工号，不会含制表符；解析时按制表符从右往左切，
      * 所以即便将来用户名里混进了别的东西也只会切错时间戳，不会串账号。
+     *
+     * 第三段是后加的。老格式（只有两段）解析时**默认判为失效** ——
+     * 宁可保守：有效性由 App 启动时的会话检查重新判定，不靠猜。
      */
     fun serialize(accounts: List<StoredAccount>): String =
-        accounts.joinToString("\n") { "${it.username}\t${it.loginAt}" }
+        accounts.joinToString("\n") { "${it.username}\t${it.loginAt}\t${if (it.valid) 1 else 0}" }
 
     fun parse(text: String?): List<StoredAccount> =
         text.orEmpty()
             .lineSequence()
-            .mapNotNull { line ->
-                if (line.isBlank()) return@mapNotNull null
-                val tab = line.lastIndexOf('\t')
-                if (tab <= 0) return@mapNotNull null
-                val at = line.substring(tab + 1).toLongOrNull() ?: return@mapNotNull null
-                StoredAccount(line.substring(0, tab), at)
-            }
+            .mapNotNull { parseLine(it) }
             .toList()
             .let(::sorted)
+
+    private fun parseLine(line: String): StoredAccount? {
+        if (line.isBlank()) return null
+        val parts = line.split('\t')
+        if (parts.size < 2) return null
+        val username = parts[0]
+        if (username.isEmpty()) return null
+        val at = parts[1].toLongOrNull() ?: return null
+        val valid = parts.getOrNull(2) == "1"
+        return StoredAccount(username, at, valid)
+    }
 }
 
 /**
@@ -76,6 +104,11 @@ class AccountStore(context: Context) {
     fun remove(username: String): List<StoredAccount> =
         AccountList.remove(load(), username).also { save(it) }
 
+    /** 整体覆盖保存。改有效标记时用。 */
+    fun save(accounts: List<StoredAccount>) {
+        prefs.edit().putString(KEY_ACCOUNTS, AccountList.serialize(accounts)).apply()
+    }
+
     fun clear() {
         prefs.edit().remove(KEY_ACCOUNTS).remove(KEY_ACTIVE).apply()
     }
@@ -88,10 +121,6 @@ class AccountStore(context: Context) {
                 if (value == null) remove(KEY_ACTIVE) else putString(KEY_ACTIVE, value)
             }.apply()
         }
-
-    private fun save(accounts: List<StoredAccount>) {
-        prefs.edit().putString(KEY_ACCOUNTS, AccountList.serialize(accounts)).apply()
-    }
 
     private companion object {
         const val PREFS = "account"
