@@ -108,6 +108,38 @@ class CasClient(private val cookieJar: PersistentCookieJar) {
             }
         }
 
+    /** 会话探测结果。 */
+    sealed interface SessionProbe {
+        data object Alive : SessionProbe
+        data object Expired : SessionProbe
+        data class Unknown(val reason: String) : SessionProbe
+    }
+
+    /**
+     * 探测当前会话是否还有效。
+     *
+     * 访问业务站点的**根路径**：已登录返回 200，未登录会 302 回 CAS。
+     * 根路径没有副作用 —— 不能用 `casgeosig.php` 当探针，那个一请求就是一次签到。
+     */
+    suspend fun probeSession(): SessionProbe = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url(CasLogin.SERVICE_ROOT.toHttpUrl())
+                .header("User-Agent", USER_AGENT)
+                .build()
+            client.newCall(request).execute().use { response ->
+                val finalHost = response.request.url.host
+                if (finalHost.equals(CasLogin.CAS_HOST, ignoreCase = true)) {
+                    SessionProbe.Expired
+                } else {
+                    SessionProbe.Alive
+                }
+            }
+        } catch (e: Exception) {
+            SessionProbe.Unknown(networkMessage(e))
+        }
+    }
+
     /** 退出登录：只清本地 Cookie，不去服务端注销那条 session。 */
     fun logout() = cookieJar.clear()
 

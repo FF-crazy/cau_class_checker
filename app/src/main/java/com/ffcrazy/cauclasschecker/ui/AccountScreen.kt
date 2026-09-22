@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,7 +29,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,7 +38,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import com.ffcrazy.cauclasschecker.AccountUiState
 import com.ffcrazy.cauclasschecker.AccountViewModel
 import com.ffcrazy.cauclasschecker.ui.theme.Border
+import com.ffcrazy.cauclasschecker.ui.theme.ErrorRed
 import com.ffcrazy.cauclasschecker.ui.theme.Green
 import com.ffcrazy.cauclasschecker.ui.theme.GreenDeep
 import com.ffcrazy.cauclasschecker.ui.theme.Ink
@@ -70,6 +71,10 @@ import com.ffcrazy.cauclasschecker.web.StoredAccount
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+
+/** 左滑露出的操作区总宽度（每个按钮 74dp，两个）。 */
+private val ACTIONS_WIDTH = 148.dp
+private val ACTION_BUTTON_WIDTH = 74.dp
 
 @Composable
 fun AccountScreen(state: AccountUiState, vm: AccountViewModel, modifier: Modifier = Modifier) {
@@ -84,6 +89,8 @@ fun AccountScreen(state: AccountUiState, vm: AccountViewModel, modifier: Modifie
 
 @Composable
 private fun AccountListScreen(state: AccountUiState, vm: AccountViewModel, modifier: Modifier = Modifier) {
+    // 保证同一时刻只展开一行
+    var revealedUser by remember { mutableStateOf<String?>(null) }
     var pendingDelete by remember { mutableStateOf<String?>(null) }
 
     Column(modifier.fillMaxSize()) {
@@ -99,12 +106,35 @@ private fun AccountListScreen(state: AccountUiState, vm: AccountViewModel, modif
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(state.accounts, key = { it.username }) { account ->
-                        AccountCard(
-                            account = account,
-                            isActive = account.username == state.activeUser,
-                            onClick = { vm.openLogin(account.username) },
-                            onDelete = { pendingDelete = account.username },
-                        )
+                        SwipeRevealRow(
+                            revealed = revealedUser == account.username,
+                            onRevealedChange = { open ->
+                                revealedUser = if (open) account.username else null
+                            },
+                            actionsWidth = ACTIONS_WIDTH,
+                            actions = {
+                                SwipeAction("验活", GreenDeep) {
+                                    revealedUser = null
+                                    vm.verify(account.username)
+                                }
+                                SwipeAction("删除", MaterialTheme.colorScheme.error) {
+                                    revealedUser = null
+                                    pendingDelete = account.username
+                                }
+                            },
+                        ) {
+                            AccountCard(
+                                account = account,
+                                onClick = {
+                                    // 展开状态下点卡片先收起，避免误触
+                                    if (revealedUser == account.username) {
+                                        revealedUser = null
+                                    } else {
+                                        vm.openLogin(account.username)
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -147,7 +177,7 @@ private fun AccountListScreen(state: AccountUiState, vm: AccountViewModel, modif
                     vm.removeAccount(name)
                     pendingDelete = null
                 }) {
-                    Text("删除", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
+                    Text("删除", color = ErrorRed, fontWeight = FontWeight.Medium)
                 }
             },
             dismissButton = {
@@ -156,6 +186,22 @@ private fun AccountListScreen(state: AccountUiState, vm: AccountViewModel, modif
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun RowScope.SwipeAction(label: String, color: Color, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxHeight()
+            .width(ACTION_BUTTON_WIDTH)
+            .padding(start = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(color)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -180,66 +226,32 @@ private fun EmptyHint() {
 }
 
 @Composable
-private fun AccountCard(
-    account: StoredAccount,
-    isActive: Boolean,
-    onClick: () -> Unit,
-    onDelete: () -> Unit,
-) {
+private fun AccountCard(account: StoredAccount, onClick: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .border(
-                width = if (isActive) 1.5.dp else 1.dp,
-                color = if (isActive) Green else Border,
-                shape = RoundedCornerShape(12.dp),
-            ),
+            .border(1.dp, Border, RoundedCornerShape(12.dp)),
     ) {
-        Row(
+        Column(
             Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onClick)
-                .padding(start = 16.dp, top = 14.dp, bottom = 14.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(horizontal = 16.dp, vertical = 14.dp),
         ) {
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        account.username,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Ink,
-                    )
-                    if (isActive) {
-                        Spacer(Modifier.width(8.dp))
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Green.copy(alpha = 0.15f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                        ) {
-                            Text("当前登录", fontSize = 11.sp, color = GreenDeep)
-                        }
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "上次登录 ${formatTime(account.loginAt)}",
-                    fontSize = 12.sp,
-                    color = Muted,
-                )
-            }
-
-            IconButton(onClick = onDelete) {
-                Icon(
-                    Icons.Filled.Delete,
-                    contentDescription = "删除",
-                    tint = Muted,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
+            Text(
+                account.username,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Ink,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "上次登录 ${formatTime(account.loginAt)}",
+                fontSize = 12.sp,
+                color = Muted,
+            )
         }
     }
 }
@@ -358,7 +370,5 @@ private val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-M
 
 private fun formatTime(epochMillis: Long): String =
     runCatching {
-        Instant.ofEpochMilli(epochMillis)
-            .atZone(ZoneId.systemDefault())
-            .format(TIME_FORMAT)
+        Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()).format(TIME_FORMAT)
     }.getOrDefault("—")

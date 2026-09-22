@@ -126,6 +126,37 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
         showMessage("已退出登录")
     }
 
+    /**
+     * 验活：探测这个账号的登录态是否还有效。
+     *
+     * ⚠️ 服务端对同一客户端只维持**一条**会话，所以只有当前登录的那个账号
+     * 才谈得上"验活"。对其它账号，验活等于「先登录它」—— 而那需要密码，
+     * 我们不存密码，所以只能如实告知。
+     */
+    fun verify(username: String) {
+        if (username != _state.value.activeUser) {
+            showMessage("$username 当前未登录。服务端一次只维持一条会话，验活需要先登录该账号。", long = true)
+            return
+        }
+        viewModelScope.launch {
+            when (val probe = client.probeSession()) {
+                is CasClient.SessionProbe.Alive ->
+                    showMessage("$username 的登录态仍然有效")
+
+                is CasClient.SessionProbe.Expired -> {
+                    // 服务端已经不认了，把本地状态对齐
+                    client.logout()
+                    store.activeUser = null
+                    _state.update { it.copy(activeUser = null) }
+                    showMessage("$username 的登录态已过期，需要重新登录", long = true)
+                }
+
+                is CasClient.SessionProbe.Unknown ->
+                    showMessage("验活失败：${probe.reason}", long = true)
+            }
+        }
+    }
+
     /** 从清单里删掉一个账号。 */
     fun removeAccount(username: String) {
         val updated = store.remove(username)
