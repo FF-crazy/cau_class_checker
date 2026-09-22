@@ -48,6 +48,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 严格模式要拍照。`ACTION_IMAGE_CAPTURE` 只接受 content:// 地址，
+             所以得有个 FileProvider 把 cacheDir 里的临时文件暴露出去。
+             照片拍完就压缩上传，不写相册 —— 那是签到的中间产物，没理由留在用户相册里。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

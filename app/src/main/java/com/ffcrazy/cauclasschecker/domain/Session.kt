@@ -9,4 +9,12 @@ package com.ffcrazy.cauclasschecker.domain
 data class Session(
     val ip: String,
     val ipt: String,
+    /**
+     * 这场签到是哪种模式，由扫到的链接决定（见 [SignMode]）。
+     *
+     * 默认普通模式，是为了兼容**不带端点信息**的输入：页面 URL 上的
+     * `?ip=…&ipt=…` 分享链接、手输的裸查询串都无从判断模式。
+     * 那种输入本来也只有一个来源 —— 我们自己分享出去的普通模式链接。
+     */
+    val mode: SignMode = SignMode.NORMAL,
 )

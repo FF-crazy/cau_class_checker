@@ -171,8 +171,12 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
      *
      * 定位**只取一次**，所有账号共用：本来就是同一台手机待在同一个位置。
      * 取不到也照签 —— 教师端后台那一列会是空的，但不该因此放弃签到。
+     *
+     * [photo] 是严格模式要的那张照片（`data:image/jpeg;base64,…`）。
+     * 同样**所有账号共用一张** —— 同一台手机、同一个时刻、同一间教室，
+     * 本来就只有一张照片可拍。普通模式传空串即可。
      */
-    fun checkInAll(session: Session) {
+    fun checkInAll(session: Session, photo: String = "") {
         val targets = _state.value.accounts
         if (targets.isEmpty()) {
             showMessage("还没有登录任何账号")
@@ -199,9 +203,9 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
                 val result = if (account.cookies.isEmpty()) {
                     CasClient.CheckInResult.NoSession("没有可用的会话，需要重新登录")
                 } else {
-                    // 现算，保证用的是此刻的时间戳
-                    val url = Sign.buildUrl(session.ip, session.ipt, Sign.nowSeconds())
-                    client.checkIn(account.cookies, url, position)
+                    // 现算，保证用的是此刻的时间戳；模式也要带上，否则严格模式会生成普通模式的链接
+                    val url = Sign.buildUrl(session.ip, session.ipt, Sign.nowSeconds(), session.mode)
+                    client.checkIn(account.cookies, url, position, photo)
                 }
 
                 outcomes += CheckInOutcome(account.username, result)

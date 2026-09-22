@@ -14,7 +14,35 @@ import java.security.MessageDigest
 object Sign {
 
     const val SALT = "caulvchunli"
-    const val BASE = "https://class.cau.edu.cn/casgeosig.php"
+
+    private const val SITE = "https://class.cau.edu.cn/"
+
+    /**
+     * 两种模式的第一步端点。**只有名字不同**，参数形状一模一样。
+     *
+     * 名字自己会说话：严格模式是 `casgeo**pic**sig.php`，`pic` = 照片 ——
+     * 第二步提交时除了 position 还要带一张 base64 的 JPEG（见 [SignMode]）。
+     */
+    private const val NORMAL_PATH = "casgeosig.php"
+    private const val STRICT_PATH = "casgeopicsig.php"
+
+    /** 严格模式的路径里多这一个 `pic`，detectMode 就靠它分辨。 */
+    private const val STRICT_MARK = "casgeopicsig"
+
+    /** 该模式的第一步入口地址。 */
+    fun base(mode: SignMode): String = SITE + when (mode) {
+        SignMode.NORMAL -> NORMAL_PATH
+        SignMode.STRICT -> STRICT_PATH
+    }
+
+    /**
+     * 从原始文本（扫到的链接 / 粘贴的内容）判断是哪一种模式。
+     *
+     * 判不出来时一律当普通模式 —— 裸查询串 `?ip=…&ipt=…` 那种输入本来就没有端点信息，
+     * 而它只有一个来源：我们自己分享出去的链接。
+     */
+    fun detectMode(raw: String?): SignMode =
+        if (raw?.contains(STRICT_MARK, ignoreCase = true) == true) SignMode.STRICT else SignMode.NORMAL
 
     private const val HEX = "0123456789abcdef"
     private const val HEX_UPPER = "0123456789ABCDEF"
@@ -39,9 +67,17 @@ object Sign {
      * 拼出签到 URL。参数顺序固定为 `ip, ipt, t, tt`（`index.html:346-354`）。
      *
      * 手写拼接而非用 URLBuilder，就是为了保证这个顺序——顺序变了眼睛看不出来，但服务端会拒绝。
+     *
+     * [mode] 决定端点：**扫到什么模式就生成什么模式**，否则严格模式的码重算出来
+     * 会变成普通模式的链接，扫进去当然签不上。
      */
-    fun buildUrl(ip: String, ipt: String, t: Long): String = buildString {
-        append(BASE)
+    fun buildUrl(
+        ip: String,
+        ipt: String,
+        t: Long,
+        mode: SignMode = SignMode.NORMAL,
+    ): String = buildString {
+        append(base(mode))
         append("?ip=").append(percentEncode(ip))
         append("&ipt=").append(percentEncode(ipt))
         append("&t=").append(t)
@@ -54,13 +90,13 @@ object Sign {
      * 顺序很关键：**先判空，再 trim，再正则，最后长度**。
      * 所以纯空格的字符串会在正则那步失败（trim 后为空，不匹配 `+` 量词）。
      */
-    fun validateSession(ip: String?, ipt: String?): Session? {
+    fun validateSession(ip: String?, ipt: String?, mode: SignMode = SignMode.NORMAL): Session? {
         if (ip.isNullOrEmpty() || ipt.isNullOrEmpty()) return null
         val vIp = ip.trim()
         val vIpt = ipt.trim()
         if (!IP_REGEX.matches(vIp) || vIp.length > IP_MAX) return null
         if (!IPT_REGEX.matches(vIpt) || vIpt.length > IPT_MAX) return null
-        return Session(vIp, vIpt)
+        return Session(vIp, vIpt, mode)
     }
 
     /**
@@ -160,7 +196,8 @@ object Sign {
     /** 抠出并校验。任一环节失败返回 null，调用方据此走错误分支。 */
     fun parseSignUrl(raw: String?): Session? {
         val (ip, ipt) = extractIpIpt(raw)
-        return validateSession(ip, ipt)
+        // 模式也从原文里看出来 —— 这一步之后 raw 就被丢掉了
+        return validateSession(ip, ipt, detectMode(raw))
     }
 
     // ---------------------------------------------------------------- 内部实现

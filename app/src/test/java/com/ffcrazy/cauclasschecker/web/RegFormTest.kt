@@ -277,4 +277,46 @@ class RegFormTest {
         )
         assertEquals("张三", pairs[1].second)
     }
+
+    // ------------------------------------------------------------------ 严格模式的照片
+
+    private val photo = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD"
+
+    /** 严格模式的表单：比普通模式多一个 `photo`。 */
+    private val strictFormFields = linkedMapOf(
+        "id" to "2023000000000",
+        "name" to "张三",
+        "nouse" to "因签到需要，请允许获取您的位置",
+        "position" to "",
+        "browserfp" to "",
+        "photo" to "",
+    )
+
+    @Test
+    fun `严格模式会把照片发出去`() {
+        val pairs = pairsOf(buildCheckInBody(strictFormFields, "1.0,2.0", photo))
+        assertEquals(photo, pairs.single { it.first == "photo" }.second)
+    }
+
+    @Test
+    fun `普通模式不会凭空多带一张照片`() {
+        // 「页面上有没有 photo 字段」正是判断严格模式的依据。
+        // 普通模式硬塞一张过去，就是在给服务端发它没要的东西。
+        val pairs = pairsOf(buildCheckInBody(formFieldsInPageOrder, "1.0,2.0", photo))
+        assertFalse("普通模式的表单里没有 photo，就不该出现：$pairs", pairs.any { it.first == "photo" })
+    }
+
+    @Test
+    fun `照片不会破坏「每个参数名只出现一次」`() {
+        val pairs = pairsOf(buildCheckInBody(strictFormFields, "1.0,2.0", photo))
+        assertEquals("参数名不能重复：$pairs", pairs.size, pairs.map { it.first }.toSet().size)
+    }
+
+    @Test
+    fun `严格模式不传照片时提交体里是空值`() {
+        // 调用方（CasClient）会在发出去之前就拦下这种情况并给出提示，
+        // 这里只保证拼装本身不会崩
+        val pairs = pairsOf(buildCheckInBody(strictFormFields, "1.0,2.0", ""))
+        assertEquals("", pairs.single { it.first == "photo" }.second)
+    }
 }

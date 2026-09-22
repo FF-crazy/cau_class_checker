@@ -212,11 +212,15 @@ class CasClient {
      *
      * [position] 是 `"经度,纬度"`，由调用方取真实定位后传入（见 `location/Position.kt`）。
      * 传空串表示拿不到定位 —— 签到照常进行，只是教师端后台那一列会是空的。
+     *
+     * [photo] 是**严格模式**才要的：`data:image/jpeg;base64,…` 形式的照片（见 `photo/Photo.kt`）。
+     * 普通模式的表单里没有 `photo` 字段，传进来也不会被发出去 —— 见 [buildCheckInBody]。
      */
     suspend fun checkIn(
         cookies: List<StoredCookie>,
         url: String,
         position: String = "",
+        photo: String = "",
     ): CheckInResult =
         withContext(Dispatchers.IO) {
             try {
@@ -234,8 +238,15 @@ class CasClient {
                 val form = RegForm.parse(page.body, page.finalUrl)
                     ?: return@withContext classifyCheckIn(plainText(page.body))
 
+                // 表单里有 photo 字段 = 这是严格模式（见 SignMode）。
+                // 没带照片就发出去是必然失败的请求，不如在这儿说清楚 ——
+                // 用户看到「需要拍照」比看到一个语焉不详的服务端拒绝有用得多。
+                if (form.fields.containsKey("photo") && photo.isEmpty()) {
+                    return@withContext CheckInResult.Rejected("这是严格模式，需要先拍一张照片")
+                }
+
                 // ---- 第二步：原样提交回 action ----
-                val body = buildCheckInBody(form.fields, position)
+                val body = buildCheckInBody(form.fields, position, photo)
                 val request = Request.Builder()
                     .url(form.action.toHttpUrl())
                     .post(body)
@@ -385,13 +396,19 @@ private val NO_FINGERPRINT: String = "0".repeat(32)
  * 代码上看不出问题（两个 `add` 隔了十几行），但线上就会表现成「明明拿到了坐标，
  * 后台那一列却是空的」。所以这里就地替换，绝不追加。
  */
-internal fun buildCheckInBody(fields: Map<String, String>, position: String): FormBody {
+internal fun buildCheckInBody(
+    fields: Map<String, String>,
+    position: String,
+    photo: String = "",
+): FormBody {
     val builder = FormBody.Builder()
 
     fields.forEach { (name, value) ->
         when (name) {
             "position" -> builder.add("position", value.ifEmpty { position.ifEmpty { NO_GEOLOCATION } })
             "browserfp" -> builder.add("browserfp", value.ifEmpty { NO_FINGERPRINT })
+            // 严格模式的照片：data URL 形式的 base64 JPEG，当普通表单字段发
+            "photo" -> builder.add("photo", value.ifEmpty { photo })
             else -> builder.add(name, value)
         }
     }
@@ -401,6 +418,9 @@ internal fun buildCheckInBody(fields: Map<String, String>, position: String): Fo
         builder.add("position", position.ifEmpty { NO_GEOLOCATION })
     }
     if (!fields.containsKey("browserfp")) builder.add("browserfp", NO_FINGERPRINT)
+
+    // photo **刻意不补** —— 「页面上有没有 photo 字段」正是判断严格模式的依据。
+    // 普通模式凭空多带一张照片，就是在给服务端发它没要的东西。
 
     return builder.build()
 }

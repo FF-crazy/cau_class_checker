@@ -155,7 +155,8 @@ class CheckInViewModel : ViewModel() {
     fun tick() {
         val session = _state.value.session ?: return
         val t = Sign.nowSeconds()
-        val url = Sign.buildUrl(session.ip, session.ipt, t)
+        // 带上模式：扫到严格模式就生成严格模式的链接，否则重算出来的是普通模式的码
+        val url = Sign.buildUrl(session.ip, session.ipt, t, session.mode)
         if (url == lastQrUrl) return
         lastQrUrl = url
         val qr = QrEncoder.encode(url, qrSizePx).toBitmap()

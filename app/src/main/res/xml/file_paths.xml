@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 能对外暴露的目录白名单。
+
+  只开 cacheDir 下的 captures/ —— 相机拍完写在那儿，读完压完就删。
+  刻意不暴露 filesDir / external，因为这里没有任何需要长期共享的文件。
+-->
+<paths>
+    <cache-path
+        name="captures"
+        path="captures/" />
+</paths>

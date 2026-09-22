@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -40,6 +41,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,11 +59,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import com.ffcrazy.cauclasschecker.CheckInUiState
 import com.ffcrazy.cauclasschecker.AccountViewModel
 import com.ffcrazy.cauclasschecker.CheckInProgress
 import com.ffcrazy.cauclasschecker.CheckInViewModel
+import com.ffcrazy.cauclasschecker.domain.SignMode
 import com.ffcrazy.cauclasschecker.location.Position
+import com.ffcrazy.cauclasschecker.photo.Photo
 import com.ffcrazy.cauclasschecker.qr.QrEncoder
 import com.ffcrazy.cauclasschecker.web.CasClient
 import com.ffcrazy.cauclasschecker.ui.theme.Border
@@ -87,17 +95,52 @@ fun SessionScreen(
     val context = LocalContext.current
     val density = LocalDensity.current.density
 
-    // 签到要带上 GPS 坐标：不传照样签得上，但教师端后台那一列会是空的。
+    // 严格模式要的那张照片（见 domain/SignMode）。**只拍一次，所有账号共用** ——
+    // 同一台手机、同一个时刻、同一间教室，本来就只有一张照片可拍。
+    var photo by remember { mutableStateOf("") }
+    var askingFrom by remember { mutableStateOf(false) }
+    val captureUri = remember { mutableStateOf<Uri?>(null) }
+    val scope = rememberCoroutineScope()
+
+    // 签到还要带上 GPS 坐标：不传照样签得上，但教师端后台那一列会是空的。
     // 授权与否都继续签 —— 不能因为拿不到坐标就不签了。
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { state.session?.let(accountVm::checkInAll) }
+    ) { state.session?.let { accountVm.checkInAll(it, photo) } }
 
     // 有权限直接签；没有就先问一次，回答完由上面的回调接着签
+    fun signNow() {
+        val session = state.session ?: return
+        if (Position.hasPermission(context)) accountVm.checkInAll(session, photo)
+        else permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
+    // 照片到手 → 压缩成 data URL → 接着签
+    fun usePhoto(uri: Uri) {
+        scope.launch {
+            val dataUrl = Photo.dataUrlFrom(context, uri)
+            if (dataUrl == null) {
+                vm.showMessage("这张照片读不出来，换一张再试", long = true)
+                return@launch
+            }
+            photo = dataUrl
+            signNow()
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture(),
+    ) { ok -> if (ok) captureUri.value?.let { usePhoto(it) } }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> uri?.let { usePhoto(it) } }
+
+    // 入口：严格模式且手上还没照片 → 先问从哪儿取；否则直接签
     val startCheckIn: () -> Unit = {
-        state.session?.let { session ->
-            if (Position.hasPermission(context)) accountVm.checkInAll(session)
-            else permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        val session = state.session
+        if (session != null) {
+            if (session.mode == SignMode.STRICT && photo.isEmpty()) askingFrom = true else signNow()
         }
     }
 
@@ -142,6 +185,47 @@ fun SessionScreen(
                 onCheckInAll = startCheckIn,
             )
         }
+    }
+
+    // 严格模式：问一句从哪儿取照片
+    if (askingFrom) {
+        AlertDialog(
+            onDismissRequest = { askingFrom = false },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(16.dp),
+            title = {
+                Text("这次签到要拍照留证", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+            },
+            text = {
+                Text(
+                    "学校把这场签到设成了严格模式，提交时要连一张照片一起交。\n\n" +
+                        "照片会压缩后随签到发给学校系统，所有账号共用这一张。",
+                    fontSize = 13.sp,
+                    color = Muted,
+                    lineHeight = 20.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    askingFrom = false
+                    val uri = Photo.newCaptureUri(context)
+                    captureUri.value = uri
+                    cameraLauncher.launch(uri)
+                }) {
+                    Text("打开相机", color = GreenDeep, fontWeight = FontWeight.Medium)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    askingFrom = false
+                    galleryLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    )
+                }) {
+                    Text("从相册选", color = GreenDeep, fontWeight = FontWeight.Medium)
+                }
+            },
+        )
     }
 
     // 批量签到的进度与结果

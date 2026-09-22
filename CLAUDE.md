@@ -81,6 +81,45 @@ URL = BASE?ip=…&ipt=…&t=…&tt=…                          // 参数顺序�
 - 登录前的校验顺序是**反的**：`tt` / `ip` / `ipt` 都等**登录之后**才验。
   所以未登录时无论 `tt` 对错，回应都是同一个 302。
 
+### 两种模式：普通 / 严格
+
+模式**从扫到的链接本身分辨**（`Sign.detectMode`），没有额外的开关。
+
+| | 普通 | 严格 |
+|---|---|---|
+| 第一步 | `casgeosig.php` | `casgeopicsig.php` |
+| 第二步 | `casgeoreg.php` / `reg.php` | `casgeopicreg.php` |
+| 提交字段 | `id, name, nouse, position, browserfp` | 同左 **+ `photo`** |
+| 第二步端点名 | 不含 `pic` | 含 `pic` |
+
+链接的**形状完全一样**（都是 `ip`/`ipt`/`t`/`tt` 四个参数），只有端点名不同 ——
+所以 `extractIpIpt` 不用改，但 **`Sign.buildUrl` 必须带上模式**：
+
+```kotlin
+Sign.buildUrl(ip, ipt, t, mode)   // 扫到什么模式，就生成什么模式的链接
+```
+
+漏了这个，严格模式的码重算出来会变成普通模式的链接，扫进去当然签不上。
+`Session.mode` 就是从链接一路带到渲染和签到的那个字段。
+
+**严格模式严在照片上**：
+
+```
+photo=data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD...
+```
+
+- 是 **data URL 形式的 base64 JPEG**，当**普通表单字段**提交 ——
+  Content-Type 仍是 `application/x-www-form-urlencoded`，**不是** `multipart/form-data`。
+  所以不用做文件上传，塞进同一个表单即可。
+- 实测抓包整个提交体 33KB，扣掉其他字段约 300 字节 → base64 约 32.6KB（原图约 24KB），
+  说明浏览器端压过。我们用长边 1280 / 质量 80（见 `photo/Photo.kt`）。
+- **照片只取一次，所有账号共用** —— 同一台手机、同一个时刻、同一间教室，只有一张可拍。
+- `Photo` 用 `ImageDecoder` 而不是 `BitmapFactory`：相机照片常带 EXIF 方向标记，
+  后者不认，出来的图会躺倒。
+- **`photo` 只在该字段存在时才发**。「页面上有没有 photo 字段」正是判断严格模式的依据，
+  普通模式凭空多带一张，就是给服务端发它没要的东西（见 `buildCheckInBody` 与它的用例）。
+- 服务端**要真照片就拍真的**。塞一张预存的图或占位图是伪造证据，和 GPS 同一条线。
+
 ### ⚠️ 页面里藏着一份被注释掉的旧表单
 
 ```html
