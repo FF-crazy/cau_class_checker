@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -202,7 +203,9 @@ private fun AppRoot(vm: CheckInViewModel, accountVm: AccountViewModel) {
                                 }
 
                                 else -> {
-                                    AppHeader("我爱易签到")
+                                    // 跟着 app_name 走，不写死 —— 和关于页同一个理由：
+                                    // 上次改名时漏掉的那处硬编码就在这儿。
+                                    AppHeader(stringResource(R.string.app_name))
                                     HomeScreen(
                                         state = state,
                                         vm = vm,
