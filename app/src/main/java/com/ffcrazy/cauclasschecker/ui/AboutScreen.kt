@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -37,12 +37,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ffcrazy.cauclasschecker.R
 import com.ffcrazy.cauclasschecker.ui.theme.Border
-import com.ffcrazy.cauclasschecker.ui.theme.BoxBg
 import com.ffcrazy.cauclasschecker.ui.theme.GreenDeep
 import com.ffcrazy.cauclasschecker.ui.theme.Ink
 import com.ffcrazy.cauclasschecker.ui.theme.Muted
@@ -85,11 +85,12 @@ private fun AboutContent(
     ) {
         Spacer(Modifier.height(52.dp))
 
-        AppIconPlaceholder()
+        AppIcon()
 
         Spacer(Modifier.height(18.dp))
 
-        Text("我爱易签到", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+        // 跟着 app_name 走，不写死：改应用名时这里会自动跟上
+        Text(stringResource(R.string.app_name), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
 
         Spacer(Modifier.height(48.dp))
 
@@ -113,19 +114,25 @@ private fun AboutContent(
     }
 }
 
-/** App 图标占位。真图标做好后换掉这一块即可。 */
+/**
+ * 应用图标。
+ *
+ * 用的是 `drawable-nodpi/ic_launcher_cat` —— 启动器图标那张位图**本体**。
+ * 不能写 `@mipmap/ic_launcher`：那是自适应图标的 XML，里面是 `<adaptive-icon>`，
+ * `painterResource` 解不了（它不是可绘制的路径）。位图本体放在 nodpi 下，
+ * 正好也是给这种场景用的。
+ */
 @Composable
-private fun AppIconPlaceholder() {
-    Box(
-        Modifier
+private fun AppIcon() {
+    val shape = RoundedCornerShape(20.dp)
+    Image(
+        painter = painterResource(R.drawable.ic_launcher_cat),
+        contentDescription = null,
+        modifier = Modifier
             .size(88.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(BoxBg)
-            .border(1.dp, Border, RoundedCornerShape(20.dp)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text("图标", fontSize = 12.sp, color = Muted.copy(alpha = 0.55f))
-    }
+            .clip(shape)
+            .border(1.dp, Border, shape),
+    )
 }
 
 @Composable
