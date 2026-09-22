@@ -44,6 +44,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
 
     // 二维码编解码：编码用 QRCodeWriter，解码用 MultiFormatReader，同一个依赖两用
     implementation(libs.zxing.core)
