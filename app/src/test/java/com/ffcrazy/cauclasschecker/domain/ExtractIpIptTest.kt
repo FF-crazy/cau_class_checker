@@ -110,6 +110,59 @@ class ExtractIpIptTest {
         assertExtracts("签到链接?ip=10.1.2.3&ipt=abc&t=1", "10.1.2.3", "abc")
     }
 
+    // ------------------------------------------- 第 4 级：CAS 登录链接里的 service
+
+    /**
+     * 真实样本：签到页发现未登录，把用户踢到统一身份认证，
+     * 原始地址被整个百分号编码塞进 service（`ip=` 变成 `ip%3D`）。
+     */
+    private val realCasUrl =
+        "https://onecas.cau.edu.cn/tpass/login?service=https%3A%2F%2Fclass.cau.edu.cn" +
+            "%2Fcasgeosig.php%3Fip%3D219.225.103.37%26ipt%3D260922155536" +
+            "%26t%3D1790065298%26tt%3D08d5"
+
+    @Test
+    fun `parses a real CAS login URL by descending into service`() {
+        assertExtracts(realCasUrl, "219.225.103.37", "260922155536")
+    }
+
+    @Test
+    fun `real CAS URL yields a full valid session`() {
+        assertEquals(
+            Session("219.225.103.37", "260922155536"),
+            Sign.parseSignUrl(realCasUrl),
+        )
+    }
+
+    @Test
+    fun `descends into service over plain http too`() {
+        assertExtracts(
+            "https://onecas.cau.edu.cn/tpass/login?service=http%3A%2F%2Fclass.cau.edu.cn" +
+                "%2Fcasgeosig.php%3Fip%3D10.1.2.3%26ipt%3Dabc",
+            "10.1.2.3",
+            "abc",
+        )
+    }
+
+    @Test
+    fun `does not descend when service carries no session`() {
+        // service 指向别处，里面没有 ip/ipt —— 不该误报
+        assertExtractsNothing(
+            "https://onecas.cau.edu.cn/tpass/login?service=https%3A%2F%2Fexample.com%2Fhome",
+        )
+    }
+
+    @Test
+    fun `descends only one level`() {
+        // CAS 套 CAS。只下钻一层，不该一路钻到底。
+        val inner = "https://class.cau.edu.cn/casgeosig.php?ip=10.1.2.3&ipt=abc"
+        val encodedInner = java.net.URLEncoder.encode(inner, "UTF-8")
+        val middleCas = "https://onecas.cau.edu.cn/tpass/login?service=$encodedInner"
+        val outerCas = "https://onecas.cau.edu.cn/tpass/login?service=" +
+            java.net.URLEncoder.encode(middleCas, "UTF-8")
+        assertExtractsNothing(outerCas)
+    }
+
     // ------------------------------------------------------------- 失败路径
 
     @Test

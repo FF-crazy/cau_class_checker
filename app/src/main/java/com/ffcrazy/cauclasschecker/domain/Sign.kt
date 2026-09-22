@@ -80,6 +80,19 @@ object Sign {
         val text = raw?.trim().orEmpty()
         if (text.isEmpty()) return null to null
 
+        // 第 1~3 级：直接在文本里找 ip / ipt
+        val direct = extractDirect(text)
+        if (!direct.first.isNullOrEmpty() && !direct.second.isNullOrEmpty()) return direct
+
+        // 第 4 级：CAS 统一身份认证登录链接。
+        //   https://onecas.cau.edu.cn/tpass/login?service=<编码后的签到URL>
+        // service 里嵌套着真正的签到地址，但它被整个百分号编码了
+        // （`ip=` 变成 `ip%3D`），前三级都匹配不到，只能解开再找。
+        return extractFromNestedUrl(text) ?: (null to null)
+    }
+
+    /** 前三级回退：完整 URL → 查询串 → 正则。 */
+    private fun extractDirect(text: String): Pair<String?, String?> {
         // 第 1 级：完整 URL
         if (text.startsWith("http://", ignoreCase = true) ||
             text.startsWith("https://", ignoreCase = true)
@@ -111,6 +124,37 @@ object Sign {
         }
 
         return null to null
+    }
+
+    /**
+     * 在所有参数值里找「本身就是个 URL」的那个，进去再找一层。
+     *
+     * 只下钻**一层**，不递归调用 [extractIpIpt]——畸形或恶意的深层嵌套
+     * 不该让解析器一直往里钻。
+     */
+    private fun extractFromNestedUrl(text: String): Pair<String?, String?>? {
+        for ((_, value) in collectParams(text)) {
+            if (value.length < 12) continue
+            if (!value.startsWith("http://", ignoreCase = true) &&
+                !value.startsWith("https://", ignoreCase = true)
+            ) continue
+            val inner = extractDirect(value)
+            if (!inner.first.isNullOrEmpty() && !inner.second.isNullOrEmpty()) return inner
+        }
+        return null
+    }
+
+    /** 把文本里能解析出的参数汇总起来（完整 URL 的查询串 + 裸查询串），保持顺序。 */
+    private fun collectParams(text: String): List<Pair<String, String>> {
+        val out = mutableListOf<Pair<String, String>>()
+        if (text.startsWith("http://", ignoreCase = true) ||
+            text.startsWith("https://", ignoreCase = true)
+        ) {
+            runCatching { URI(text).rawQuery }.getOrNull()?.let { out += parseQuery(it) }
+        }
+        val afterQuestion = text.substringAfter('?', text).substringBefore('#')
+        if (afterQuestion.contains('=')) out += parseQuery(afterQuestion)
+        return out
     }
 
     /** 抠出并校验。任一环节失败返回 null，调用方据此走错误分支。 */

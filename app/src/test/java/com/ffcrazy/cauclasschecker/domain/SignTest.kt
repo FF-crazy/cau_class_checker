@@ -20,6 +20,9 @@ class SignTest {
     fun `ticket matches the reference vectors bit for bit`() {
         // t, ip, 期望的完整 32 位 md5(t + ip + "caulvchunli")
         val vectors = listOf(
+            // ↓ 生产数据。取自一条真实的 CAS 登录链接，tt 是服务器自己签发的，
+            //   不是我们算出来的 —— 这一条能证明 SALT 和拼接顺序在真实环境里正确。
+            Triple(1790065298L, "219.225.103.37", "08d5c7ff064fd7940cf89087504fcb5a"),
             Triple(1700000000L, "10.1.2.3", "c76d688de8f8aff2bd045a7be746b178"),
             Triple(1700000000L, "2001:db8::1", "77ea34f339ef5e2f8ee6cff979d15767"),
             Triple(0L, "0.0.0.0", "53d1b679127d081cf20a4d6965f84b80"),
@@ -122,6 +125,20 @@ class SignTest {
         val fresh = Sign.buildUrl(s!!.ip, s.ipt, 1700000000L)
         assertEquals("c76d", fresh.substringAfter("&tt="))
         assertEquals("新 URL 里的 t 必须是新时间", "1700000000", fresh.substringAfter("&t=").substringBefore("&"))
+    }
+
+    @Test
+    fun `reproduces the signature the real server issued`() {
+        // 真实链路：某次签到页把用户踢到 CAS 登录页时，service 参数里带着
+        // t=1790065298、ip=219.225.103.37、tt=08d5。我们应当算出同一个 tt。
+        val t = 1790065298L
+        val ip = "219.225.103.37"
+        assertEquals("08d5", Sign.ticket(t, ip))
+        assertEquals(
+            "https://class.cau.edu.cn/casgeosig.php" +
+                "?ip=219.225.103.37&ipt=260922155536&t=1790065298&tt=08d5",
+            Sign.buildUrl(ip, "260922155536", t),
+        )
     }
 
     private fun md5Of(input: String): String {
