@@ -33,6 +33,9 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+# 底部栏的图标。Material3 从某个版本起不再传递依赖图标库，需要显式声明。
+# 版本由 BOM 管理（当前 1.7.8，已冻结但可用）；只要三个基础图标，不引 material-icons-extended。
+androidx-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
 
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camera" }

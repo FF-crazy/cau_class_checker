@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -198,17 +199,17 @@ private fun readClipboard(context: Context): String? {
     return runCatching { clip.getItemAt(0).coerceToText(context)?.toString() }.getOrNull()
 }
 
-/** 主页顶栏。只放 App 名，没有多余文字。 */
+/** 通用顶栏：左对齐一个标题 + 细分隔线，三个 Tab 共用。 */
 @Composable
-fun HomeHeader() {
+fun AppHeader(title: String) {
     Column {
         Text(
-            "我爱易签到",
+            title,
             fontSize = 17.sp,
             fontWeight = FontWeight.SemiBold,
             color = Ink,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
         )
-        androidx.compose.material3.HorizontalDivider(color = Border, thickness = 1.dp)
+        HorizontalDivider(color = Border, thickness = 1.dp)
     }
 }
