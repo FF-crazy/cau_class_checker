@@ -80,12 +80,16 @@ object CasLogin {
      * 抓不到就返回 null，由调用方给一句兜底文案。
      */
     fun parseErrorMessage(html: String): String? {
-        val m = ERROR_SPAN.find(html) ?: return null
-        val text = m.groupValues[1]
-            .replace(TAG, " ")
-            .replace(WHITESPACE, " ")
-            .trim()
-        return text.ifEmpty { null }
+        // 真实页面上有**两个** id="errormsg" 的元素：一个隐藏的弹窗版、一个常驻版，
+        // 服务端可能只往其中一个写文案。所以取第一个非空的，而不是第一个匹配到的。
+        for (m in ERROR_SPAN.findAll(html)) {
+            val text = m.groupValues[1]
+                .replace(TAG, " ")
+                .replace(WHITESPACE, " ")
+                .trim()
+            if (text.isNotEmpty()) return text
+        }
+        return null
     }
 
     /** `application/x-www-form-urlencoded` 编码，空格用 `+`（与网页表单一致）。 */

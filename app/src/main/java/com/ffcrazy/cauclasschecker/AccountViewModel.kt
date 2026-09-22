@@ -1,12 +1,13 @@
 package com.ffcrazy.cauclasschecker
 
 import android.app.Application
-import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.ffcrazy.cauclasschecker.web.AccountStore
 import com.ffcrazy.cauclasschecker.web.CasClient
 import com.ffcrazy.cauclasschecker.web.LoginResult
 import com.ffcrazy.cauclasschecker.web.PersistentCookieJar
+import com.ffcrazy.cauclasschecker.web.StoredAccount
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,32 +19,37 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 data class AccountUiState(
-    /** 已登录的账号；null 表示未登录。 */
-    val loggedInUser: String? = null,
+    /** 登录过的账号，按最近登录时间倒序。 */
+    val accounts: List<StoredAccount> = emptyList(),
+    /** 当前处于登录态的账号；null 表示没有。 */
+    val activeUser: String? = null,
     val busy: Boolean = false,
-) {
-    val loggedIn: Boolean get() = loggedInUser != null
-}
+    /** true 表示正在二级登录页。 */
+    val onLoginScreen: Boolean = false,
+    /** 二级登录页预填的账号（从列表点进来时带上）。 */
+    val prefillUsername: String = "",
+)
 
 /**
  * 账号管理。
  *
- * 无头登录：整个流程走 HTTP，不用 WebView。登录成功后会话 Cookie 落盘，
- * **密码只在这一刻存在于内存里，不写入任何存储** —— 所以服务端 session
- * 过期后需要重新输入。
+ * ## 为什么是「账号清单」而不是「多账号同时在线」
+ * `class.cau.edu.cn` 只有一个 `PHPSESSID`，服务端对同一客户端只维持一条会话 ——
+ * 任何时刻只可能有一个账号处于登录态。加上我们不保存密码，切换到另一个账号
+ * 必然要重新输入。所以这份清单的定位是：**记住用过哪些账号、当前是哪个、
+ * 方便一键回到某个账号**。
  */
 class AccountViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-
+    private val store = AccountStore(app)
     private val cookieJar = PersistentCookieJar(File(app.filesDir, COOKIE_FILE))
-
     private val client = CasClient(cookieJar)
 
     private val _state = MutableStateFlow(
         AccountUiState(
-            // 记住的账号只有在 Cookie 还在时才认为处于登录态
-            loggedInUser = prefs.getString(KEY_USER, null)?.takeIf { client.looksLoggedIn() },
+            accounts = emptyList(),
+            // 记着上次登录的账号，但只有会话 Cookie 还在才算数
+            activeUser = null,
         ),
     )
     val state: StateFlow<AccountUiState> = _state.asStateFlow()
@@ -51,23 +57,60 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
     private val _messages = Channel<UiMessage>(Channel.BUFFERED)
     val messages: Flow<UiMessage> = _messages.receiveAsFlow()
 
+    init {
+        val remembered = store.activeUser
+        val stillValid = remembered != null && client.looksLoggedIn()
+        if (remembered != null && !stillValid) {
+            // Cookie 没了（被清掉或过期），登录态不成立，但账号仍留在清单里
+            store.activeUser = null
+        }
+        _state.update {
+            it.copy(accounts = store.load(), activeUser = remembered.takeIf { stillValid })
+        }
+    }
+
+    // ------------------------------------------------------------------ 页面流转
+
+    /** 打开二级登录页。[prefill] 用于从列表点某个账号时带上用户名。 */
+    fun openLogin(prefill: String = "") {
+        _state.update { it.copy(onLoginScreen = true, prefillUsername = prefill) }
+    }
+
+    fun closeLogin() {
+        _state.update { it.copy(onLoginScreen = false, prefillUsername = "") }
+    }
+
+    // ------------------------------------------------------------------ 登录 / 退出
+
     fun login(username: String, password: String) {
         if (_state.value.busy) return
-        if (username.isBlank() || password.isEmpty()) {
+        val name = username.trim()
+        if (name.isEmpty() || password.isEmpty()) {
             showMessage("请先填写账号和密码")
             return
         }
 
         _state.update { it.copy(busy = true) }
         viewModelScope.launch {
-            when (val result = client.login(username.trim(), password)) {
+            when (val result = client.login(name, password)) {
                 is LoginResult.Success -> {
-                    prefs.edit().putString(KEY_USER, result.username).apply()
-                    _state.update { it.copy(busy = false, loggedInUser = result.username) }
-                    showMessage("登录成功")
+                    // 同一账号后覆盖前：upsert 会顶掉旧条目并刷新时间，不会重复
+                    val updated = store.upsert(result.username, System.currentTimeMillis())
+                    store.activeUser = result.username
+                    _state.update {
+                        it.copy(
+                            accounts = updated,
+                            activeUser = result.username,
+                            busy = false,
+                            onLoginScreen = false,
+                            prefillUsername = "",
+                        )
+                    }
+                    showMessage("登录成功，账户为：${result.username}")
                 }
 
                 is LoginResult.Failure -> {
+                    // 停在二级页面，让用户直接改了重试
                     _state.update { it.copy(busy = false) }
                     showMessage(result.message, long = true)
                 }
@@ -77,9 +120,24 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
 
     fun logout() {
         client.logout()
-        prefs.edit().remove(KEY_USER).apply()
-        _state.update { it.copy(loggedInUser = null) }
+        store.activeUser = null
+        // 只清登录态，不清账号清单 —— 下次还能一键回来
+        _state.update { it.copy(activeUser = null) }
         showMessage("已退出登录")
+    }
+
+    /** 从清单里删掉一个账号。 */
+    fun removeAccount(username: String) {
+        val updated = store.remove(username)
+        val wasActive = _state.value.activeUser == username
+        if (wasActive) {
+            client.logout()
+            store.activeUser = null
+        }
+        _state.update {
+            it.copy(accounts = updated, activeUser = if (wasActive) null else it.activeUser)
+        }
+        showMessage("已删除账号 $username")
     }
 
     private fun showMessage(text: String, long: Boolean = false) {
@@ -87,8 +145,6 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
-        const val PREFS = "account"
-        const val KEY_USER = "logged_in_user"
         const val COOKIE_FILE = "cas-cookies.txt"
     }
 }

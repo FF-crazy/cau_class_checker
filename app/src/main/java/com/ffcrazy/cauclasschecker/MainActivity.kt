@@ -167,10 +167,9 @@ private fun AppRoot(vm: CheckInViewModel, accountVm: AccountViewModel) {
                             }
                         }
 
-                        AppTab.ACCOUNT -> Column(Modifier.fillMaxSize()) {
-                            AppHeader("账号管理")
-                            AccountScreen(state = accountState, vm = accountVm)
-                        }
+                        // 「账号管理」自带顶栏：登录表单是二级页，
+                        // 顶栏要跟着在「账号管理」和「← 返回」之间切换
+                        AppTab.ACCOUNT -> AccountScreen(state = accountState, vm = accountVm)
 
                         // 「关于」自带顶栏：它内部还有「开源协议」二级页，
                         // 顶栏要跟着切换，所以不在这里包 AppHeader
