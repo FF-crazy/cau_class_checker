@@ -1,10 +1,13 @@
 package com.ffcrazy.cauclasschecker.ui
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -55,6 +58,7 @@ import com.ffcrazy.cauclasschecker.CheckInUiState
 import com.ffcrazy.cauclasschecker.AccountViewModel
 import com.ffcrazy.cauclasschecker.CheckInProgress
 import com.ffcrazy.cauclasschecker.CheckInViewModel
+import com.ffcrazy.cauclasschecker.location.Position
 import com.ffcrazy.cauclasschecker.qr.QrEncoder
 import com.ffcrazy.cauclasschecker.web.CasClient
 import com.ffcrazy.cauclasschecker.ui.theme.Border
@@ -82,6 +86,20 @@ fun SessionScreen(
     val accountState by accountVm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val density = LocalDensity.current.density
+
+    // 签到要带上 GPS 坐标：不传照样签得上，但教师端后台那一列会是空的。
+    // 授权与否都继续签 —— 不能因为拿不到坐标就不签了。
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { state.session?.let(accountVm::checkInAll) }
+
+    // 有权限直接签；没有就先问一次，回答完由上面的回调接着签
+    val startCheckIn: () -> Unit = {
+        state.session?.let { session ->
+            if (Position.hasPermission(context)) accountVm.checkInAll(session)
+            else permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
 
     // 举着给扫码器看的页面，屏幕绝不能熄
     val view = LocalView.current
@@ -121,7 +139,7 @@ fun SessionScreen(
                 vm = vm,
                 context = context,
                 accountCount = accountState.accounts.size,
-                onCheckInAll = { state.session?.let(accountVm::checkInAll) },
+                onCheckInAll = startCheckIn,
             )
         }
     }

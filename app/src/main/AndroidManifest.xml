@@ -8,6 +8,13 @@
     <!-- 扫码需要。声明为非必需，没摄像头的设备也能装 —— 粘贴链接那条路照样能用 -->
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!-- 签到要带上 GPS 坐标。
+         不给也能签成功，但教师端后台那一列会是空的（实测过：服务端会解析这个值、
+         认坐标格式，只是解析失败照样放行），一眼就能看出这几条和别人的不一样。
+         所以声明为非必需：用户拒绝授权时照常签到，只是没有坐标。 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
     <uses-feature
         android:name="android.hardware.camera.any"
         android:required="false" />

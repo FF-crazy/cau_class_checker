@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ffcrazy.cauclasschecker.domain.Session
 import com.ffcrazy.cauclasschecker.domain.Sign
+import com.ffcrazy.cauclasschecker.location.Position
 import com.ffcrazy.cauclasschecker.web.AccountRecord
 import com.ffcrazy.cauclasschecker.web.AccountRepository
 import com.ffcrazy.cauclasschecker.web.CasClient
@@ -167,6 +168,9 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
      *
      * 串行发送而不是并发：账号数量很少（不超过 15），串行更温和，
      * 也不容易触发服务端的频率限制；界面有进度可看，不会显得卡住。
+     *
+     * 定位**只取一次**，所有账号共用：本来就是同一台手机待在同一个位置。
+     * 取不到也照签 —— 教师端后台那一列会是空的，但不该因此放弃签到。
      */
     fun checkInAll(session: Session) {
         val targets = _state.value.accounts
@@ -178,6 +182,12 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(checkIn = CheckInProgress(0, targets.size)) }
 
         viewModelScope.launch {
+            // 先定位，再进循环 —— 一次定位够所有账号用
+            val position = Position.current(getApplication())
+            if (position == null) {
+                showMessage("没取到定位，本次签到不带 GPS 坐标", long = true)
+            }
+
             val outcomes = mutableListOf<CheckInOutcome>()
 
             for ((index, account) in targets.withIndex()) {
@@ -186,7 +196,7 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     // 现算，保证用的是此刻的时间戳
                     val url = Sign.buildUrl(session.ip, session.ipt, Sign.nowSeconds())
-                    client.checkIn(account.cookies, url)
+                    client.checkIn(account.cookies, url, position.orEmpty())
                 }
 
                 outcomes += CheckInOutcome(account.username, result)

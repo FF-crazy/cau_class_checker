@@ -208,8 +208,15 @@ class CasClient {
      *
      * [url] 由调用方在**发请求前一刻**生成，因为 `t` 是按秒滚动的，
      * 提前批量生成会让靠后的账号拿到过期的码。
+     *
+     * [position] 是 `"经度,纬度"`，由调用方取真实定位后传入（见 `location/Position.kt`）。
+     * 传空串表示拿不到定位 —— 签到照常进行，只是教师端后台那一列会是空的。
      */
-    suspend fun checkIn(cookies: List<StoredCookie>, url: String): CheckInResult =
+    suspend fun checkIn(
+        cookies: List<StoredCookie>,
+        url: String,
+        position: String = "",
+    ): CheckInResult =
         withContext(Dispatchers.IO) {
             try {
                 // 两步必须共用同一个罐子：LastVisit 是跟着会话走的
@@ -229,9 +236,14 @@ class CasClient {
                 // ---- 第二步：原样提交回 action ----
                 val builder = FormBody.Builder()
                 form.fields.forEach { (k, v) -> builder.add(k, v) }
-                // 这两个字段实测服务端不校验（填占位值照样签到成功）。
-                // 但**留空会触发页面脚本的拦截逻辑**，所以补个非空占位。
-                if (form.fields["position"].isNullOrEmpty()) builder.add("position", NO_GEOLOCATION)
+                // 坐标：服务端**不校验**内容（实测非坐标字符串照样签到成功），
+                // 但它会解析并存下来 —— 解析失败那一列就是空的，教师端一眼能看出来。
+                // 所以能拿到真实定位就传真实的；拿不到才退回一个非空占位符
+                // （留空会触发页面脚本的拦截逻辑）。
+                if (form.fields["position"].isNullOrEmpty()) {
+                    builder.add("position", position.ifEmpty { NO_GEOLOCATION })
+                }
+                // 指纹同理，但服务端确实不存它，用占位即可
                 if (form.fields["browserfp"].isNullOrEmpty()) builder.add("browserfp", NO_FINGERPRINT)
 
                 val request = Request.Builder()
@@ -313,7 +325,12 @@ class CasClient {
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
 
-        /** 页面脚本要求 position 非空才允许提交；服务端并不校验它的内容。 */
+        /**
+         * 取不到真实定位时的兜底值。
+         *
+         * 页面脚本要求 position 非空才允许提交，而服务端对内容照单全收 ——
+         * 它只会把解析不出坐标的值存成空。所以这只是让请求形态合法，不是有效坐标。
+         */
         const val NO_GEOLOCATION = "1,User denied Geolocation"
 
         /** 同理。真实值是 FingerprintJS 的 visitorId，我们造不出来，也不需要。 */
