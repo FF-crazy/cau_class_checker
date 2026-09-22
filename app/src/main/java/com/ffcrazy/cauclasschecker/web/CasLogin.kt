@@ -80,9 +80,20 @@ object CasLogin {
      * 抓不到就返回 null，由调用方给一句兜底文案。
      */
     fun parseErrorMessage(html: String): String? {
-        // 真实页面上有**两个** id="errormsg" 的元素：一个隐藏的弹窗版、一个常驻版，
-        // 服务端可能只往其中一个写文案。所以取第一个非空的，而不是第一个匹配到的。
-        for (m in ERROR_SPAN.findAll(html)) {
+        // ⚠️ 服务端的失败原因**不在** #errormsg 里 —— 那个元素始终为空，
+        // 它只被页面自己的 JS 用来显示「账号不能为空」这类本地校验。
+        //
+        // 真正的原因写在 #errormsghide 里，例如：
+        //   「您还剩20次机会！若密码连续输错60次，账号将被锁定19分钟。」
+        // 而且这个元素**只在失败响应里出现**，首次 GET 时根本不存在。
+        //
+        // 所以先找 errormsghide，再退回 errormsg（本地校验文案）。
+        return messageById(html, "errormsghide") ?: messageById(html, "errormsg")
+    }
+
+    /** 取某个 id 的元素内部文本；元素不存在或内容为空则返回 null。 */
+    private fun messageById(html: String, id: String): String? {
+        for (m in spanById(id).findAll(html)) {
             val text = m.groupValues[1]
                 .replace(TAG, " ")
                 .replace(WHITESPACE, " ")
@@ -92,22 +103,17 @@ object CasLogin {
         return null
     }
 
+    private fun spanById(id: String) = Regex(
+        """id\s*=\s*["']""" + Regex.escape(id) + """["'][^>]*>(.*?)</(?:span|div|p|label|td|li)\b""",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
+
     /** `application/x-www-form-urlencoded` 编码，空格用 `+`（与网页表单一致）。 */
     private fun urlEncode(s: String): String =
         java.net.URLEncoder.encode(s, "UTF-8")
 
     private val INPUT_TAG = Regex("""<input\b[^>]*>""", RegexOption.IGNORE_CASE)
     private val ATTR = Regex("""([A-Za-z_][\w:-]*)\s*=\s*["']([^"']*)["']""")
-    /**
-     * 匹配 `id="errormsg"` 元素的**全部**内部内容。
-     *
-     * 收尾必须是块级闭合标签，不能只写 `</` —— 否则非贪婪匹配会停在第一个内层
-     * 标签上（比如 `账号<b>已锁定</b>` 里的 `</b>`），把后面的文字截掉。
-     */
-    private val ERROR_SPAN = Regex(
-        """id\s*=\s*["']errormsg["'][^>]*>(.*?)</(?:span|div|p|label|td|li)\b""",
-        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
-    )
     private val TAG = Regex("""<[^>]+>""")
     private val WHITESPACE = Regex("""\s+""")
 }

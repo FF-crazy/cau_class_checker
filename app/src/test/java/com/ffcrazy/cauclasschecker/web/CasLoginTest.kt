@@ -117,6 +117,39 @@ class CasLoginTest {
 
     // ------------------------------------------------------------- 错误提取
 
+    /**
+     * 真实的失败页面结构（已实测）：
+     * `#errormsg` 有两个且**都是空的**，服务端的失败原因写在 `#errormsghide` 里。
+     * 只读 `#errormsg` 的话永远拿不到原因 —— 这是踩过的坑。
+     */
+    @Test
+    fun `reads the failure reason from errormsghide, not the always-empty errormsg`() {
+        val realFailurePage = """
+            <div class="row">
+              <span class="login_box_title_notice script_red" style="display:none" id="errormsg"></span>
+            </div>
+            <p>
+              <span id="errormsghide" class="login_box_title_notice script_red">您还剩20次机会！若密码连续输错60次，账号将被锁定19分钟。</span>
+            </p>
+            <span class="login_box_title_notice script_red" id="errormsg"></span>
+        """.trimIndent()
+
+        assertEquals(
+            "您还剩20次机会！若密码连续输错60次，账号将被锁定19分钟。",
+            CasLogin.parseErrorMessage(realFailurePage),
+        )
+    }
+
+    @Test
+    fun `a clean login page yields no error message`() {
+        // 首次 GET 时 errormsghide 根本不存在，errormsg 是空的
+        val cleanPage = """
+            <span class="login_box_title_notice script_red" style="display:none" id="errormsg"></span>
+            <span class="login_box_title_notice script_red" id="errormsg"></span>
+        """.trimIndent()
+        assertNull(CasLogin.parseErrorMessage(cleanPage))
+    }
+
     @Test
     fun `extracts the error message from a failed login page`() {
         val html = """<div class="tip"><span id="errormsg">用户名或密码错误</span></div>"""
