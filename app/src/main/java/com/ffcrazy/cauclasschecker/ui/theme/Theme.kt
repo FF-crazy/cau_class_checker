@@ -6,23 +6,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 /**
- * 刻意**关闭动态取色**（Studio 模板默认开着）。
- *
- * 这个 App 的视觉标识就是页头那条荧光绿，跟着系统壁纸变色就没意义了。
- * 也刻意只做浅色主题——网页版就只有一套配色，没有深色模式。
+ * 刻意**关闭动态取色**（Studio 模板默认开着）——这个 App 的配色是固定的，
+ * 跟着系统壁纸变就没有统一观感了。也刻意只做浅色主题。
  */
 private val CheckInColors = lightColorScheme(
-    primary = GreenDark,
+    primary = Green,
     onPrimary = Color.White,
-    secondary = Green,
-    onSecondary = Ink,
+    primaryContainer = GreenTint,
+    onPrimaryContainer = GreenDeep,
+    secondary = GreenDeep,
+    onSecondary = Color.White,
     background = Bg,
     onBackground = Ink,
     surface = Color.White,
     onSurface = Ink,
-    surfaceVariant = UrlBoxBg,
+    surfaceVariant = BoxBg,
     onSurfaceVariant = Muted,
     outline = Border,
+    outlineVariant = Border,
     error = ErrorRed,
     onError = Color.White,
 )

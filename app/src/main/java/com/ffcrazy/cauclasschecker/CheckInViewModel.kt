@@ -133,6 +133,12 @@ class CheckInViewModel : ViewModel() {
 
     fun setAutoRefresh(enabled: Boolean) = _state.update { it.copy(autoRefresh = enabled) }
 
+    /** 返回主页：清掉会话，但保留「自动刷新」这个偏好。 */
+    fun clearSession() {
+        lastQrUrl = ""
+        _state.update { CheckInUiState(autoRefresh = it.autoRefresh) }
+    }
+
     /** 统一的错误出口：清空会话、停掉二维码，对应网页版 `showError`（`index.html:558`）。 */
     fun showError(message: String) {
         lastQrUrl = ""

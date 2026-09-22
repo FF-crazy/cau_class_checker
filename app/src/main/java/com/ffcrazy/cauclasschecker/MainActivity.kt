@@ -6,13 +6,21 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ffcrazy.cauclasschecker.domain.Sign
 import com.ffcrazy.cauclasschecker.scan.ScanScreen
-import com.ffcrazy.cauclasschecker.ui.CheckInScreen
+import com.ffcrazy.cauclasschecker.ui.HomeHeader
+import com.ffcrazy.cauclasschecker.ui.HomeScreen
+import com.ffcrazy.cauclasschecker.ui.SessionScreen
 import com.ffcrazy.cauclasschecker.ui.theme.CauCheckInTheme
 
 class MainActivity : ComponentActivity() {
@@ -26,28 +34,46 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             CauCheckInTheme {
-                // 只有一个二级页面，用不着引 navigation 库
-                var scanning by rememberSaveable { mutableStateOf(false) }
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
+                    // 页面由「有没有会话」决定：拿到会话就自动进二级页面。
+                    // 扫码 / 相册 / 粘贴三条路都汇入 startSession，所以这里不用分别处理。
+                    val state by vm.state.collectAsStateWithLifecycle()
+                    var scanning by rememberSaveable { mutableStateOf(false) }
 
-                if (scanning) {
-                    BackHandler { scanning = false }
-                    ScanScreen(
-                        onDecoded = { text ->
-                            scanning = false
-                            val session = Sign.parseSignUrl(text)
-                            if (session == null) {
-                                vm.showError(CheckInViewModel.MSG_BAD_QR + text)
-                            } else {
-                                vm.startSession(session, "识别成功：扫码")
-                            }
-                        },
-                        onClose = { scanning = false },
-                    )
-                } else {
-                    CheckInScreen(
-                        vm = vm,
-                        onOpenScanner = { scanning = true },
-                    )
+                    when {
+                        scanning -> {
+                            BackHandler { scanning = false }
+                            ScanScreen(
+                                onDecoded = { text ->
+                                    scanning = false
+                                    val session = Sign.parseSignUrl(text)
+                                    if (session == null) {
+                                        vm.showError(CheckInViewModel.MSG_BAD_QR + text)
+                                    } else {
+                                        vm.startSession(session, null)
+                                    }
+                                },
+                                onClose = { scanning = false },
+                            )
+                        }
+
+                        state.hasSession -> {
+                            BackHandler { vm.clearSession() }
+                            SessionScreen(vm = vm, onBack = { vm.clearSession() })
+                        }
+
+                        else -> Column(Modifier.fillMaxSize()) {
+                            HomeHeader()
+                            HomeScreen(
+                                state = state,
+                                vm = vm,
+                                onOpenScanner = { scanning = true },
+                            )
+                        }
+                    }
                 }
             }
         }
