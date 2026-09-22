@@ -118,6 +118,27 @@ class CheckInViewModel : ViewModel() {
         showMessage(MSG_OK)
     }
 
+    /**
+     * 从粘贴板导入。
+     *
+     * 和 [applyLink] 的区别在于提示措辞：手动粘贴时用户明确知道自己贴了什么，
+     * 而点「从粘贴板导入」时用户不知道剪贴板里到底有没有东西，
+     * 所以要区分「空的」和「有内容但不是签到链接」两种情况。
+     */
+    fun applyClipboard(raw: String?) {
+        if (raw.isNullOrBlank()) {
+            showMessage(MSG_CLIPBOARD_EMPTY)
+            return
+        }
+        val parsed = Sign.parseSignUrl(raw)
+        if (parsed == null) {
+            showMessage(MSG_CLIPBOARD_NO_LINK, long = true)
+            return
+        }
+        startSession(parsed)
+        showMessage(MSG_OK)
+    }
+
     /** 所有输入路径的汇合点。 */
     fun startSession(session: Session) {
         lastQrUrl = ""
@@ -170,6 +191,8 @@ class CheckInViewModel : ViewModel() {
         const val TICK_MS = 500L
 
         const val MSG_BAD_LINK = "链接里需要有效的 ip 和 ipt；旧链接里的时间戳会被忽略，改用当前时间重算。"
+        const val MSG_CLIPBOARD_EMPTY = "粘贴板是空的"
+        const val MSG_CLIPBOARD_NO_LINK = "粘贴板里没有找到签到链接，复制一条签到链接后再试"
         const val MSG_OK = "已生成当前时间的签到码"
         const val MSG_REFRESHED = "已按当前时间刷新"
         const val MSG_BAD_QR = "识别到的内容不是易签到链接（需要包含 ip、ipt 参数）："

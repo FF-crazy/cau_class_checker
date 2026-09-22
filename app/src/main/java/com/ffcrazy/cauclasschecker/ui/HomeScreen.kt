@@ -1,5 +1,7 @@
 package com.ffcrazy.cauclasschecker.ui
 
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -127,6 +129,20 @@ fun HomeScreen(
             Text("从相册导入", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
 
+        Spacer(Modifier.height(12.dp))
+
+        OutlinedButton(
+            onClick = { vm.applyClipboard(readClipboard(context)) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp),
+            shape = RoundedCornerShape(12.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = GreenDeep),
+        ) {
+            Text("从粘贴板导入", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
+
         Spacer(Modifier.height(28.dp))
 
         Row(
@@ -164,6 +180,22 @@ fun HomeScreen(
         }
 
     }
+}
+
+/**
+ * 读粘贴板首条内容。
+ *
+ * 只在用户**主动点击按钮**时读——Android 10 起后台读粘贴板会被系统拒绝，
+ * 而点击时应用处于前台，是允许的。Android 12+ 还会顺手弹一个系统级的
+ * 「已粘贴」提示，那个我们控制不了，属正常现象。
+ *
+ * 拿不到就返回 null，由 ViewModel 决定怎么提示。
+ */
+private fun readClipboard(context: Context): String? {
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return null
+    val clip = cm.primaryClip ?: return null
+    if (clip.itemCount == 0) return null
+    return runCatching { clip.getItemAt(0).coerceToText(context)?.toString() }.getOrNull()
 }
 
 /** 主页顶栏。只放 App 名，没有多余文字。 */
