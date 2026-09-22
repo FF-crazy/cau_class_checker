@@ -58,11 +58,7 @@ class CasClient(private val cookieJar: PersistentCookieJar) {
                 val execution = hidden["execution"]
 
                 if (lt.isNullOrEmpty() || execution.isNullOrEmpty()) {
-                    // 页面拿到了但结构不对：多半是认证服务改版，或者被网络中间设备插了页面
-                    return@withContext LoginResult.Failure(
-                        "登录页结构不认识了（没找到 lt / execution）。" +
-                            "可能是学校认证系统改版，或网络被劫持插入了页面。",
-                    )
+                    return@withContext LoginResult.Failure(describeUnexpectedPage(loginPage))
                 }
 
                 // 2)+3) 构造并提交
@@ -155,6 +151,25 @@ class CasClient(private val cookieJar: PersistentCookieJar) {
 
         else ->
             "登录出错：${e.message ?: e::class.java.simpleName}"
+    }
+
+    /**
+     * GET 拿到了响应，但它不是我们认识的登录页。
+     *
+     * 带上**实际字节数** —— 这是最有诊断价值的一个数字：
+     * 0 字节说明请求根本没到服务器；几千字节但没表单，多半是被代理或
+     * 校园网认证页拦截了；接近 15KB 才是正常的登录页大小。
+     */
+    private fun describeUnexpectedPage(body: String): String {
+        val size = body.length
+        val looksLikeForm = body.contains("<input", ignoreCase = true)
+        val detail = when {
+            size == 0 -> "服务器返回了空响应（0 字节）"
+            !looksLikeForm -> "返回的内容不是登录页（$size 字节，里面没有表单元素）"
+            else -> "登录页里找不到 lt / execution（$size 字节）"
+        }
+        return "$detail。\n常见原因：手机上开着 VPN / 代理，或校园网需要先认证上网。" +
+            "关掉代理、连上校园网后再试。"
     }
 
     private fun get(url: String): String {

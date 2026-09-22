@@ -1,0 +1,405 @@
+
+
+
+
+<html>
+<head>
+	
+	
+    <script type="text/javascript">
+    
+    /* 通过cookie保存url中#后面的内容 by liu.r_neu */
+    document.cookie = "cas_hash=" + encodeURIComponent(window.location.hash) ;
+    
+    
+	
+    
+    var dm = document.documentMode;
+    //判断是否为低版本ie（ie5,6,7,8）
+    if(dm){
+    	if(dm == "5" || dm == "6" || dm == "7" || dm == "8"){
+    		//cookie存放低版本标识
+    		document.cookie = "lowIE=y";
+    		//判断cookie中是否存放低版本ie标识，没有则重载页面
+    		var lowIE = -1;
+    		if(lowIE == -1){
+    			
+    			location.reload();
+    		}
+    	}else{
+    		document.cookie = "lowIE=n";
+    		var highIE = -1;
+    		if(highIE == -1){
+    			
+    			location.reload();
+    		}
+    	}
+    }
+    </script>
+	
+	     
+
+
+
+
+
+
+
+
+
+
+<!DOCTYPE html>
+<html>
+<head>
+	<script type="text/javascript">
+	//存在父页面，并且父页面不是当前系统（casLogoutView.jsp中如果不做判断会一直刷新）
+	if(window.top!=window.self && 
+			window.top.location.href.indexOf("onecas.cau.edu.cn")==-1 &&
+			window.top.location.href.indexOf("/tpass")==-1){
+				window.top.location.reload();
+	}
+	</script>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width,minimum-scale=1,maximum-scale=1,initial-scale=1,user-scalable=no" />
+    <meta name="keywords" content="" />
+    <meta name="decription" content="" />
+	<meta http-equiv="Pragma" content="no-cache">
+	<meta http-equiv="Cache-Control" content="no-cache">
+	<meta http-equiv="Expires" content="0">
+	<meta name="renderer" content="webkit">
+	<link rel="stylesheet" type="text/css" href="/tpass/comm/icon/icon.css">
+    <link rel="stylesheet" type="text/css" href="/tpass/comm/icon/ie7/ie7.css">
+    <link rel="stylesheet" type="text/css" href="/tpass/comm/plugin/captcha/captcha.css">
+    <link rel="stylesheet" type="text/css" href="/tpass/comm/css/minimal/minimal.css" />
+
+    <link rel="stylesheet" type="text/css" href="/tpass/comm/css/styled.css">
+    <!-- 新的轮播部分 css start-->
+    <link rel="stylesheet" type="text/css" href="/tpass/comm/css/swiper.min.css">
+	<!-- 新的轮播部分 css end-->
+	<script type="text/javascript" src="/tpass/comm/icon/ie7/ie7.js"></script>
+	<title>统一身份认证</title>
+	
+</head>
+<body class="login_bg_f" id="container_bg" style="height: 100%;min-width:100%;">
+<form id="loginForm" action="/tpass/login?service=https%3A%2F%2Fclass.cau.edu.cn%2F" method="post">
+    <div class="header_01">
+
+			<div class="header_01_space">
+				<span class="letter"></span>
+				<a class="header_01_logo" href="javascript:;">
+					<img src="/tpass/comm/image/dlut/head_logo.png">
+				</a>
+				<span class="loginpage_head_point" style="margin-left:-5px;"></span>
+				<font class="loginpage_head_txt">统一身份认证</font>
+				<span class="loginpage-letter"></span>
+				<!--<p class="header_01_help">
+				  <a id="change_language" value="English" class="zh-en"  style="color:#FFF">
+                        English
+                  </a>
+                </p>-->
+			</div>
+		</div>
+		<div class="mid_container">
+			<div class="container_space">
+				<div class="login_banner" id="myFocus" style="margin:20px 0;">
+					
+					<!-- 新的轮播部分 start-->
+					<div class="swiper-container">
+				        <div class="swiper-wrapper">
+
+				            <div class="swiper-slide"><a href="http://news.cau.edu.cn/art/2021/11/17/art_10867_798142.html" target="_blank"><img src="/tpass/comm/image/login-pic-01.png" style="max-width:100%;"></a></div>
+								<div class="swiper-slide"><img src="/tpass/comm/image/login-pic-02.png" style="max-width:100%;"></div>
+								<div class="swiper-slide"><img src="/tpass/comm/image/login-pic-03.png" style="max-width:100%;"></div>
+
+
+				        </div>
+				        <!-- Add Pagination -->
+				        <div id="swiper-pagination1" class="swiper-pagination swiper-pagination-bullets"></div>
+				    </div>
+					<!-- 新的轮播部分 end -->
+				</div>
+				<div class="content_login_box">
+					<div class="login_box_tab">
+						<a class="password active" id="password_login">账号登录</a>
+						<a class="er-code" id="qrcode_login"><span>微信扫码</span></a>
+						<a class="phone-code" id="phoneCode_login"><span>手机登录</span></a>
+					</div>
+					<div class="login_box_title">
+						<span class="login_box_title_notice script_red" style="display:none" id="errormsg"></span>
+					</div>
+					<div class="row" id="login_content">
+					</div>
+				</div>
+			</div>
+		</div>
+		<div id="footer">
+			<div class="footer-inside-bar">
+				<div class="footer_bar">
+					<span class="row margin_top_17">中国农业大学 版权所有 © 2019 校备案号：258_19104</span>
+					<span class="row margin_top_7">地址：北京市海淀区清华东路17号（学院路北口）</span>
+				</div>
+				<div class="right">
+					<span class="row margin_top_17">总访问量：232485653 &nbsp;&nbsp;&nbsp;  当日访问量：99453 &nbsp;&nbsp;&nbsp;  日均访问量：87698</span>
+				</div>
+				<p class="footer-mobile">中国农业大学 版权所有 © 2019 校备案号：258_19104</p>
+			</div>
+		</div>
+		<!-- 放大二维码 start -->
+		<div class="popup-outside-content" id="qrcodBig"  style="display:none">
+				<div class="bg-shadow-box"></div>
+				   <div class="popup-main-box">
+		
+						<div class="popup-body-box" id="newBigqrcode">
+						  <img src="comm/image/cau_qyh_big.png?version=1.0" style="width:100%;" >
+					    </div>
+				  </div>
+		</div>
+		<!-- 放大二维码 end -->
+		  <input type="hidden" id="rsa" name="rsa"/>
+	      <input type="hidden" id="ul" name="ul"/>
+	      <input type="hidden" id="pl" name="pl"/>
+	      <input type="hidden" id="sl" name="sl"/>
+	      <input type="hidden" id="lt" name="lt" value="LT-0000000-FAKEFAKEFAKEFAKEFAKEFAKEFAKE-tpass" />
+	      <input type="hidden" name="execution" value="e1s1" />
+	      <input type="hidden" name="_eventId" value="submit" />
+	      
+	      <p style="display:none;">
+	      
+	      </p>
+	      
+		</form>
+		
+	
+	<script type="text/javascript" src="/tpass/comm/js/jquery.min.js"></script>
+	<script type="text/javascript" src="/tpass/comm/js/jquery.cookie.js"></script>
+    <script type="text/javascript" src="/tpass/comm/js/des.js"></script>
+    <script type="text/javascript" src="/tpass/comm/js/jquery.qrcode.min.js"></script>
+    <script type="text/javascript" src="/tpass/comm/plugin/captcha/jquery-1.10.3-ui.min.js"></script>
+    <script type="text/javascript" src="/tpass/comm/plugin/captcha/jquery.captcha.js"></script>
+    <script type="text/javascript" src="/tpass/comm/js/login6.js"></script>
+	<script type="text/javascript" src="/tpass/comm/js/icheck.min.js"></script>
+	<script type="text/javascript" src="/tpass/comm/js/qrcode.js"></script>
+	<script type="text/javascript" src="/tpass/comm/js/login-qrcode.js"></script>
+    <script type="text/javascript" src="https://wep.cau.edu.cn/js/qrcode.js"></script>
+    <script type="text/javascript" src="https://wep.cau.edu.cn/js/mxsocket.js"></script>
+	
+	
+	<script type="text/javascript">
+	$(document).ready(function(){
+		$('#input-1').iCheck({
+			checkboxClass:'icheckbox_minimal',
+			radioClass:'iradio_square-blue',
+			increaseArea:'20%'
+		});
+	});
+	</script>
+ 
+	<!-- 新的轮播部分 js start-->
+	<script type="text/javascript" src="/tpass/comm/js/swiper.jquery.min.js"></script>
+	<script type="text/javascript">
+	$(document).ready(function(){
+		var swiper = new Swiper('.swiper-container', {
+	        pagination: '.swiper-pagination',
+	        slidesPerView: 1,
+	        paginationClickable :true,
+	        spaceBetween: 0,
+	        pagination : '#swiper-pagination1',
+	        paginationType: 'bullets',
+	        autoplay : 3000,
+	        loop : true
+	    });
+	});
+	</script>
+	<!-- 新的轮播部分 js end-->
+	<script id="password_template" type="text/html">
+						<div class="login_box_up">
+							<div class="login_box_title">
+								<span class="login_box_title_notice script_red" id="errormsg"></span>
+							</div>
+	                        <input class="login_box_input person" id="un" tabindex="1" 
+         						autocomplete="off" placeholder="职工号/学号"/>
+							<input class="login_box_input lock"   id="pd" tabindex="2" type="password"
+                        	autocomplete="off" placeholder="输入密码" />
+							<div class="down_link_choice">
+							  <!--  <div class="login_box_checkbox">
+								    <input type="checkbox" name="rememberMe" id="rememberMe"/>
+								</div>   
+								<span class="login_box_checkbox_label">30天免登录</span>-->
+								<span class="login_box_checkbox_label"><a href="/tpass/activate?locale=" class="login_box_psd" style="color: red;font-weight: bold;font-size: 15px;">激活账号</a>
+								</span>
+								<a href="pwd?locale=" class="login_box_psd" style="color: red;font-weight: bold;">找回密码</a>
+							</div>
+    				        
+							<span class="landing_btn_bg" id="index_login_btn" >
+								<input type="button" class="login_box_landing_btn" />
+								登录
+							</span>
+						</div>
+					<div class="row qq_bar" id="isPc" style="margin:0 0 10px;display:flex;justify-content: center;">
+							<a href="https://graph.qq.com/oauth2.0/authorize?client_id=101834895&response_type=code&redirect_uri=http%3A%2F%2Fonecas.cau.edu.cn%2Ftpass%2Fqq&ascope=get_user_info&state=cau" class="qq" style="margin:0;">QQ登录</a>
+							<span class="qq_line"></span>
+							<a href="https://open.weixin.qq.com/connect/qrconnect?appid=wx2a132e1dec8b1b35&redirect_uri=http://onecas.cau.edu.cn/tpass/wx&response_type=code&scope=snsapi_login&state=STATE#wechat_redirect" class="wx">微信登录</a>
+						</div> 
+						<div class="row qq_bar" id="isNotPc" style="display:none;margin:0 0 10px;">
+							<a href="https://graph.qq.com/oauth2.0/authorize?client_id=101834895&response_type=code&redirect_uri=http%3A%2F%2Fonecas.cau.edu.cn%2Ftpass%2Fqq&ascope=get_user_info&state=cau" class="qq">QQ登录</a>
+						</div> 
+			<div class="login_box_down">
+				<p class="login_box_notice">
+					<p class="login_box_notice" style="padding:0;">
+					<font class="graybold title">登录提示：</font>
+				</p>
+				<p class="login_box_notice" style="padding:0;">
+					<span class="">1、用户名和密码与原校内平台一致；</span>
+				</p>
+				<p class="login_box_notice">
+					<span class="">2、为了安全的考虑，建议大家定期修改密码。</span>
+				</p>
+				<p class="login_box_notice">
+					<span class="">客服电话 : 010-62738000 </span>
+				</p>
+								<p class="browser">
+									<span class="left">建议浏览器：</span>
+									<a style="margin-left:0;" class="ie_pic" target="_blank" href="http://windows.microsoft.com/zh-cn/internet-explorer/download-ie">IE10+</a>
+									<a class="firefox_pic" target="_blank" href="http://www.firefox.com.cn/download/">火狐</a>
+									<a class="google_pic" target="_blank" href="http://rj.baidu.com/soft/detail/14744.html?ald">谷歌</a>
+								</p>
+							</p>
+								</div>
+								<div class="" name="cleckBig">
+							  <p ><span class=""><center><img src="comm/image/cau_qyh.png"/></center></span></p>
+							  <p class="login_box_notice"><span class=""><center><font class="graybold title">扫码关注“中国农业大学”企业号</center></font></p>
+							  <p class="login_box_notice">&nbsp;</p>
+							<!--</p>-->
+						</div>
+	</script>
+	<script id="qrcode_template" type="text/html">
+						
+ <div class="login_tab_box" style="padding-bottom:0px;">
+									
+									<div class="qr-code-box" id="qrcode" style="padding-left:50px;">
+										 
+									</div>
+									<div class="login_box_down" style="margin-bottom:10px;">
+									<p class="new_student left" style="position:relative;margin:0;">360浏览器请使用极速模式
+										<a class="open_360" id="open_360">
+											(如何使用?)<span class="b_360" id="open_360_img"><img src="comm/image/open360fast.png" width="826" height="170"></span>
+										</a>
+									</p>
+									<p class="browser">
+										<span class="left graybold">建议浏览器：</span>
+										<a style="margin-left:0;" class="ie_pic" target="_blank" href="http://windows.microsoft.com/zh-cn/internet-explorer/download-ie">
+											IE10+
+										</a>
+										<a class="firefox_pic" target="_blank" href="http://www.firefox.com.cn/download/">
+											火狐
+										</a>
+										<a class="google_pic" target="_blank" href="http://rj.baidu.com/soft/detail/14744.html?ald">
+											谷歌
+										</a>
+									</p>
+									</div>
+								</div>
+	</script>
+	<script id="phonecode_template" type="text/html">
+	<div class="login_box_up">
+		<input type="text" class="login_box_input phone-number" placeholder="手机号码"  id="phone"/>
+		<img src="/tpass/" style="display:none;" id="getPhoneCode"/>
+		<div class="ide-code-box">
+			<input id="phoneCode" type="text" placeholder="验证码" style="width: calc(100% - 181px);" class="codeimage_input">
+			<input type="button" class="code-btn" id="getPhone" value="获取验证码" style="cursor: pointer; "/>
+		</div>
+		<span class="landing_btn_bg" id="index_login_btn_phone">
+		<input type="button" class="login_box_landing_btn" />
+		登录 </span>
+	</div>
+		<div class="login_box_down">
+			<p class="login_box_notice" style="padding:0;">
+				<font class="graybold title">如收不到验证码：</font>
+			</p>
+			<p class="login_box_notice" style="padding:0;">
+				<span class="">1、请检查短信是否被安全软件拦截。</span>
+			</p>
+			<p class="new_student left" style="position:relative;margin:0;">
+				2、运营商网络原因，短信可能延迟到达，建议您切换登录方式。
+			</p>
+			</div>
+			<div class="">
+			<p><span class=""><center><img src="comm/image/cau_qyh.png"/></center></span></p>
+							  <p class="login_box_notice"><span class=""><center><font class="graybold title">扫码关注“中国农业大学”企业号</center></font></p>
+			</div>		
+	</script>
+</body>
+<script language="javascript"type="text/javascript">
+/**
+ * 通过分割字符串获取查询参数
+ * @param {string} name - 参数名
+ * @returns {string|null}
+ */
+function getQueryParamLegacy(name) {
+    // 获取问号后面的部分，如果没有问号则返回空字符串
+    var query = window.location.search.substring(1);
+    if (!query) return null;
+
+    // 将参数对按 & 分割
+    var pairs = query.split("&");
+    
+    for (var i = 0; i < pairs.length; i++) {
+        var pair = pairs[i].split("=");
+        // 确保键名匹配（注意解码键名以防万一）
+        if (decodeURIComponent(pair[0]) === name) {
+            // 返回解码后的值，将 + 号替换为空格（处理 application/x-www-form-urlencoded 编码）
+            return pair[1] ? decodeURIComponent(pair[1].replace(/\+/g, " ")) : "";
+        }
+    }
+    
+    return null;
+}
+
+// 使用示例
+var lang = getQueryParamLegacy("locale");
+console.log(lang);
+if(lang==='en'){
+	$('html').attr('lang','en')
+}else{
+	$('html').attr('lang','zh-cn')
+}
+$("#change_language").unbind("click").click(function(){
+    var re=eval('/(locale=)([^&]*)/gi');
+    var url = window.location.href;
+    if($("#change_language").attr("value") != "English"){
+       if(url.indexOf("locale") >= 0 ) {
+          url=url.replace(re,'locale=zh_CN');
+          location.href=url;
+       }else{
+          if(url.indexOf("?") >= 0){
+             location.href=url+"&locale=zh_CN";
+          }else{
+             location.href=url+"?locale=zh_CN";
+          }
+       }
+       
+    }else if($("#change_language").attr("value") == "English") {
+       if(url.indexOf("locale") >= 0 ) {
+          url=url.replace(re,'locale=en');
+          location.href=url;
+       }else{
+          if(url.indexOf("?") >= 0){
+             location.href=url+"&locale=en";
+          }else{
+             location.href=url+"?locale=en";
+          }
+       }
+       
+    }
+});
+</script>
+ 
+</html>
+	
+
+	
+	
+	
+</head>
+</html>
