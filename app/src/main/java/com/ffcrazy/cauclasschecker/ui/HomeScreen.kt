@@ -81,7 +81,8 @@ fun HomeScreen(
                 if (session == null) {
                     vm.showError(CheckInViewModel.MSG_BAD_QR + text)
                 } else {
-                    vm.startSession(session, null)
+                    vm.startSession(session)
+                    vm.showMessage(CheckInViewModel.MSG_OK)
                 }
             }
         }
@@ -162,10 +163,6 @@ fun HomeScreen(
             }
         }
 
-        state.error?.let { message ->
-            Spacer(Modifier.height(14.dp))
-            Text(message, color = ErrorRed, fontSize = 13.sp, lineHeight = 20.sp)
-        }
     }
 }
 

@@ -111,15 +111,6 @@ fun SessionScreen(
             Spacer(Modifier.height(18.dp))
 
             Controls(state = state, vm = vm, context = context)
-
-            state.status?.let {
-                Spacer(Modifier.height(12.dp))
-                Text(it, color = GreenDeep, fontSize = 13.sp)
-            }
-            state.error?.let {
-                Spacer(Modifier.height(12.dp))
-                Text(it, color = ErrorRed, fontSize = 13.sp, lineHeight = 20.sp)
-            }
         }
     }
 }
@@ -249,7 +240,7 @@ private fun Controls(state: CheckInUiState, vm: CheckInViewModel, context: Conte
             SecondaryButton("立即刷新", enabled, Modifier.weight(1f)) { vm.forceRefresh() }
             SecondaryButton("复制链接", enabled, Modifier.weight(1f)) {
                 copyToClipboard(context, state.url)
-                vm.dismissStatus()
+                vm.showMessage("签到链接已复制")
             }
         }
 

@@ -8,13 +8,24 @@ import com.ffcrazy.cauclasschecker.domain.Sign
 import com.ffcrazy.cauclasschecker.qr.QrEncoder
 import com.ffcrazy.cauclasschecker.qr.toBitmap
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+/**
+ * 一条一次性提示。
+ *
+ * @param long 需要用户读完再消失（比如识别失败的引导语）用 true，
+ *             「已刷新」这种扫一眼就够的用 false。
+ */
+data class UiMessage(val text: String, val long: Boolean = false)
 
 /** 签到页的全部状态。 [qr] 为 null 表示还没有会话。 */
 data class CheckInUiState(
@@ -24,8 +35,6 @@ data class CheckInUiState(
     val t: Long = 0L,
     val tt: String = "",
     val autoRefresh: Boolean = true,
-    val status: String? = null,
-    val error: String? = null,
 ) {
     val hasSession: Boolean get() = session != null
 }
@@ -33,13 +42,23 @@ data class CheckInUiState(
 /**
  * 签到页状态机。
  *
- * 三条输入路径（拍照 / 相册 / 粘贴链接）最终都汇入 [startSession]，
- * 失败都汇入 [showError]——对应网页版的 `onSessionReady` / `showError`。
+ * 三条输入路径（扫码 / 相册 / 粘贴链接）最终都汇入 [startSession]，
+ * 失败都汇入 [showError] —— 对应网页版的 `onSessionReady` / `showError`。
  */
 class CheckInViewModel : ViewModel() {
 
     private val _state = MutableStateFlow(CheckInUiState())
     val state: StateFlow<CheckInUiState> = _state.asStateFlow()
+
+    /**
+     * 提示走 Channel 而不是塞进 StateFlow。
+     *
+     * 因为「弹一条提示」是**一次性事件**，不是状态：放进 state 的话，
+     * 转屏、切后台回来都会因为重新订阅而重放一遍，用户会看到同一条提示弹两次。
+     * Channel 保证每条提示只被消费一次。
+     */
+    private val _messages = Channel<UiMessage>(Channel.BUFFERED)
+    val messages: Flow<UiMessage> = _messages.receiveAsFlow()
 
     /** 当前二维码的像素边长，由界面按实际宽度和屏幕密度算好回填。 */
     private var qrSizePx = 720
@@ -83,6 +102,11 @@ class CheckInViewModel : ViewModel() {
         tick()
     }
 
+    /** 弹一条一次性提示。 */
+    fun showMessage(text: String, long: Boolean = false) {
+        viewModelScope.launch { _messages.send(UiMessage(text, long)) }
+    }
+
     /** 粘贴链接入口。 */
     fun applyLink(raw: String) {
         val parsed = Sign.parseSignUrl(raw)
@@ -90,21 +114,14 @@ class CheckInViewModel : ViewModel() {
             showError(MSG_BAD_LINK)
             return
         }
-        startSession(parsed, MSG_FROM_LINK)
+        startSession(parsed)
+        showMessage(MSG_OK)
     }
 
     /** 所有输入路径的汇合点。 */
-    fun startSession(session: Session, status: String?) {
+    fun startSession(session: Session) {
         lastQrUrl = ""
-        _state.update {
-            it.copy(
-                session = session,
-                status = status,
-                error = null,
-                t = 0L,
-                tt = "",
-            )
-        }
+        _state.update { it.copy(session = session, t = 0L, tt = "") }
         tick()
     }
 
@@ -128,7 +145,7 @@ class CheckInViewModel : ViewModel() {
     fun forceRefresh() {
         lastQrUrl = ""
         tick()
-        _state.update { it.copy(status = MSG_REFRESHED) }
+        showMessage(MSG_REFRESHED)
     }
 
     fun setAutoRefresh(enabled: Boolean) = _state.update { it.copy(autoRefresh = enabled) }
@@ -143,26 +160,17 @@ class CheckInViewModel : ViewModel() {
     fun showError(message: String) {
         lastQrUrl = ""
         _state.update {
-            it.copy(
-                session = null,
-                url = "",
-                qr = null,
-                t = 0L,
-                tt = "",
-                status = null,
-                error = message,
-            )
+            it.copy(session = null, url = "", qr = null, t = 0L, tt = "")
         }
+        showMessage(message, long = true)
     }
-
-    fun dismissStatus() = _state.update { it.copy(status = null, error = null) }
 
     companion object {
         /** 与网页版 `setInterval(updateDisplay, 500)` 一致（`index.html:530`）。 */
         const val TICK_MS = 500L
 
-        const val MSG_BAD_LINK = "链接里需要有效的 ip 和 ipt；旧链接中的 t、tt 会被忽略，改用当前时间重算。"
-        const val MSG_FROM_LINK = "已从链接提取 ip / ipt，正在按当前时间生成签到码"
+        const val MSG_BAD_LINK = "链接里需要有效的 ip 和 ipt；旧链接里的时间戳会被忽略，改用当前时间重算。"
+        const val MSG_OK = "已生成当前时间的签到码"
         const val MSG_REFRESHED = "已按当前时间刷新"
         const val MSG_BAD_QR = "识别到的内容不是易签到链接（需要包含 ip、ipt 参数）："
         const val MSG_NO_QR = "未能识别二维码，请换更清晰的近景或裁切二维码区域后重试。"
