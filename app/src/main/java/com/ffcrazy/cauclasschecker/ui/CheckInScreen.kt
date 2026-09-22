@@ -5,6 +5,9 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -34,18 +37,18 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -58,23 +61,32 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ffcrazy.cauclasschecker.CheckInUiState
 import com.ffcrazy.cauclasschecker.CheckInViewModel
+import com.ffcrazy.cauclasschecker.domain.Sign
 import com.ffcrazy.cauclasschecker.qr.QrEncoder
+import com.ffcrazy.cauclasschecker.scan.QrImageDecoder
 import com.ffcrazy.cauclasschecker.ui.theme.Border
 import com.ffcrazy.cauclasschecker.ui.theme.ErrorRed
 import com.ffcrazy.cauclasschecker.ui.theme.Green
-import com.ffcrazy.cauclasschecker.ui.theme.GreenDark
 import com.ffcrazy.cauclasschecker.ui.theme.Ink
 import com.ffcrazy.cauclasschecker.ui.theme.Muted
 import com.ffcrazy.cauclasschecker.ui.theme.StatusGreen
 import com.ffcrazy.cauclasschecker.ui.theme.UrlBoxBg
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
-fun CheckInScreen(vm: CheckInViewModel, modifier: Modifier = Modifier) {
+fun CheckInScreen(
+    vm: CheckInViewModel,
+    onOpenScanner: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val density = LocalDensity.current.density
+    val scope = rememberCoroutineScope()
 
-    // 教室扫码时屏幕不能熄——网页版靠手机常亮设置，这里直接锁住。
+    // 教室扫码时屏幕不能熄——网页版靠手机系统设置，这里直接锁住
     val view = LocalView.current
     DisposableEffect(Unit) {
         view.keepScreenOn = true
@@ -82,6 +94,28 @@ fun CheckInScreen(vm: CheckInViewModel, modifier: Modifier = Modifier) {
     }
 
     var linkText by rememberSaveable { mutableStateOf("") }
+
+    // 相册路径。PickVisualMedia 不需要任何存储权限——系统相册自己负责授权。
+    val pickImage = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            // 解码大图可能要几百毫秒，别卡住主线程
+            val text = withContext(Dispatchers.IO) { QrImageDecoder.decode(context, uri) }
+            when {
+                text == null -> vm.showError(CheckInViewModel.MSG_NO_QR)
+                else -> {
+                    val session = Sign.parseSignUrl(text)
+                    if (session == null) {
+                        vm.showError(CheckInViewModel.MSG_BAD_QR + text)
+                    } else {
+                        vm.startSession(session, "识别成功：相册图片")
+                    }
+                }
+            }
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -103,13 +137,48 @@ fun CheckInScreen(vm: CheckInViewModel, modifier: Modifier = Modifier) {
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text(
-                        "上传的大屏二维码，或粘贴扫到的签到链接，无论有没有过期，都可以生成新鲜的二维码和签到链接",
+                        "扫大屏二维码，或粘贴扫到的签到链接，无论有没有过期，都可以生成新鲜的二维码和签到链接",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Ink,
                     )
 
                     Spacer(Modifier.height(14.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = onOpenScanner,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Green,
+                                contentColor = Ink,
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text("扫码", fontWeight = FontWeight.SemiBold)
+                        }
+                        Button(
+                            onClick = {
+                                pickImage.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                contentColor = Ink,
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text("相册", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    Spacer(Modifier.height(18.dp))
 
                     LinkField(
                         value = linkText,
@@ -166,12 +235,7 @@ private fun HeaderBar() {
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
         ) {
-            Text(
-                "我爱易签到",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = Ink,
-            )
+            Text("我爱易签到", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
         }
     }
 }
@@ -246,7 +310,7 @@ private fun QrOutput(state: CheckInUiState, density: Float, vm: CheckInViewModel
                     modifier = Modifier
                         .padding(10.dp)
                         .size(displayDp.dp)
-                        .background(androidx.compose.ui.graphics.Color.White),
+                        .background(Color.White),
                     // 二维码绝不能插值——模糊的边缘会让扫码器读不出来
                     filterQuality = FilterQuality.None,
                 )
@@ -259,7 +323,6 @@ private fun QrOutput(state: CheckInUiState, density: Float, vm: CheckInViewModel
 
 @Composable
 private fun UrlBox(url: String) {
-    val text = url.ifEmpty { "—" }
     Box(
         Modifier
             .fillMaxWidth()
@@ -270,7 +333,7 @@ private fun UrlBox(url: String) {
             .verticalScroll(rememberScrollState()),
     ) {
         Text(
-            text,
+            url.ifEmpty { "—" },
             fontFamily = FontFamily.Monospace,
             fontSize = 12.sp,
             lineHeight = 18.sp,
@@ -307,12 +370,7 @@ private fun MetaRow(label: String, value: String) {
             color = Ink,
             modifier = Modifier.width(40.dp),
         )
-        Text(
-            value,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
-            color = Muted,
-        )
+        Text(value, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = Muted)
     }
 }
 
@@ -405,12 +463,10 @@ private fun shareUrl(context: Context, url: String) {
 /**
  * 暂时用系统浏览器打开。
  *
- * 下一步会换成 App 内 WebView —— 那样才能和统一身份认证共享 Cookie，
+ * 下一步换成 App 内 WebView —— 那样才能和统一身份认证共享 Cookie，
  * 现在这样跳出去是拿不到登录态的。
  */
 private fun openUrl(context: Context, url: String) {
     if (url.isEmpty()) return
-    runCatching {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-    }
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
 }

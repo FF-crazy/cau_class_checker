@@ -2,9 +2,16 @@ package com.ffcrazy.cauclasschecker
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import com.ffcrazy.cauclasschecker.domain.Sign
+import com.ffcrazy.cauclasschecker.scan.ScanScreen
 import com.ffcrazy.cauclasschecker.ui.CheckInScreen
 import com.ffcrazy.cauclasschecker.ui.theme.CauCheckInTheme
 
@@ -19,7 +26,29 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             CauCheckInTheme {
-                CheckInScreen(vm)
+                // 只有一个二级页面，用不着引 navigation 库
+                var scanning by rememberSaveable { mutableStateOf(false) }
+
+                if (scanning) {
+                    BackHandler { scanning = false }
+                    ScanScreen(
+                        onDecoded = { text ->
+                            scanning = false
+                            val session = Sign.parseSignUrl(text)
+                            if (session == null) {
+                                vm.showError(CheckInViewModel.MSG_BAD_QR + text)
+                            } else {
+                                vm.startSession(session, "识别成功：扫码")
+                            }
+                        },
+                        onClose = { scanning = false },
+                    )
+                } else {
+                    CheckInScreen(
+                        vm = vm,
+                        onOpenScanner = { scanning = true },
+                    )
+                }
             }
         }
     }

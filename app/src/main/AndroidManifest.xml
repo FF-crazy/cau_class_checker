@@ -5,7 +5,9 @@
     <!-- 打开签到页 / 加载 WebView 需要 -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- 后续扫码要用；声明为非必需，没摄像头的设备也能装（粘贴链接这条路照样能用） -->
+    <!-- 扫码需要。声明为非必需，没摄像头的设备也能装 —— 粘贴链接那条路照样能用 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
     <uses-feature
         android:name="android.hardware.camera.any"
         android:required="false" />
