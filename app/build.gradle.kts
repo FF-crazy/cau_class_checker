@@ -32,6 +32,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // AGP 8 起默认不再生成 BuildConfig，而 WebView 调试开关要用 BuildConfig.DEBUG
+        buildConfig = true
     }
 }
 
@@ -49,6 +51,9 @@ dependencies {
 
     // 二维码编解码：编码用 QRCodeWriter，解码用 MultiFormatReader，同一个依赖两用
     implementation(libs.zxing.core)
+
+    // 无头登录：CAS 登录 + 后续签到请求
+    implementation(libs.okhttp)
 
     // 相机预览与逐帧分析
     implementation(libs.androidx.camera.core)

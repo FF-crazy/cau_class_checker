@@ -17,6 +17,10 @@ zxing = "3.5.4"
 # 对本项目（JDK 25）直接相关，所以锁死这个版本。
 camera = "1.6.2"
 
+# 无头 HTTP 登录用。选它是因为要跨域跳转（onecas → class）时
+# 正确携带 Cookie，手写 HttpURLConnection 的跳转+Cookie 处理太容易出错。
+okhttp = "5.5.0"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -38,6 +42,7 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
 
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camera" }
 androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camera" }
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camera" }

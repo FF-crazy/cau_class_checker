@@ -46,22 +46,24 @@ import com.ffcrazy.cauclasschecker.ui.AccountScreen
 import com.ffcrazy.cauclasschecker.ui.AppHeader
 import com.ffcrazy.cauclasschecker.ui.HomeScreen
 import com.ffcrazy.cauclasschecker.ui.SessionScreen
-import com.ffcrazy.cauclasschecker.ui.theme.Border
 import com.ffcrazy.cauclasschecker.ui.theme.CauCheckInTheme
 import com.ffcrazy.cauclasschecker.ui.theme.GreenDeep
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
     // 用 Activity 的 viewModels() 而不是 Compose 的 viewModel()，
     // 这样不必再引 lifecycle-viewmodel-compose，少一个版本要操心。
     private val vm: CheckInViewModel by viewModels()
+    private val accountVm: AccountViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             CauCheckInTheme {
-                AppRoot(vm)
+                AppRoot(vm, accountVm)
             }
         }
     }
@@ -88,8 +90,9 @@ private enum class AppTab(val label: String, val icon: ImageVector) {
 }
 
 @Composable
-private fun AppRoot(vm: CheckInViewModel) {
+private fun AppRoot(vm: CheckInViewModel, accountVm: AccountViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val accountState by accountVm.state.collectAsStateWithLifecycle()
 
     // 存下标而不是枚举本身 —— rememberSaveable 对枚举要额外写 Saver，下标省事
     var tabIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -98,14 +101,11 @@ private fun AppRoot(vm: CheckInViewModel) {
 
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // 一次性提示。ViewModel 侧用的是 Channel，所以转屏不会重放同一条。
-    LaunchedEffect(vm) {
-        vm.messages.collect { msg ->
-            snackbarHostState.showSnackbar(
-                message = msg.text,
-                duration = if (msg.long) SnackbarDuration.Long else SnackbarDuration.Short,
-            )
-        }
+    // 两个 ViewModel 各有各的提示通道，这里合流到同一个 SnackbarHost。
+    // 用 Channel 而不是 StateFlow，所以转屏不会重放同一条。
+    LaunchedEffect(vm, accountVm) {
+        launch { collectMessages(vm.messages, snackbarHostState) }
+        launch { collectMessages(accountVm.messages, snackbarHostState) }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -169,7 +169,7 @@ private fun AppRoot(vm: CheckInViewModel) {
 
                         AppTab.ACCOUNT -> Column(Modifier.fillMaxSize()) {
                             AppHeader("账号管理")
-                            AccountScreen()
+                            AccountScreen(state = accountState, vm = accountVm)
                         }
 
                         // 「关于」自带顶栏：它内部还有「开源协议」二级页，
@@ -186,6 +186,16 @@ private fun AppRoot(vm: CheckInViewModel) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = if (scanning) 16.dp else 96.dp, start = 16.dp, end = 16.dp),
+        )
+    }
+}
+
+/** 把一条提示送进 Snackbar；需要读完的用长停留。 */
+private suspend fun collectMessages(messages: Flow<UiMessage>, host: SnackbarHostState) {
+    messages.collect { msg ->
+        host.showSnackbar(
+            message = msg.text,
+            duration = if (msg.long) SnackbarDuration.Long else SnackbarDuration.Short,
         )
     }
 }
