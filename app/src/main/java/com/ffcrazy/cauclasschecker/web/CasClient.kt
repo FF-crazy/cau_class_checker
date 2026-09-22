@@ -234,21 +234,9 @@ class CasClient {
                     ?: return@withContext classifyCheckIn(plainText(page.body))
 
                 // ---- 第二步：原样提交回 action ----
-                val builder = FormBody.Builder()
-                form.fields.forEach { (k, v) -> builder.add(k, v) }
-                // 坐标：服务端**不校验**内容（实测非坐标字符串照样签到成功），
-                // 但它会解析并存下来 —— 解析失败那一列就是空的，教师端一眼能看出来。
-                // 所以能拿到真实定位就传真实的；拿不到才退回一个非空占位符
-                // （留空会触发页面脚本的拦截逻辑）。
-                if (form.fields["position"].isNullOrEmpty()) {
-                    builder.add("position", position.ifEmpty { NO_GEOLOCATION })
-                }
-                // 指纹同理，但服务端确实不存它，用占位即可
-                if (form.fields["browserfp"].isNullOrEmpty()) builder.add("browserfp", NO_FINGERPRINT)
-
                 val request = Request.Builder()
                     .url(form.action.toHttpUrl())
-                    .post(builder.build())
+                    .post(buildCheckInBody(form.fields, position))
                     .header("User-Agent", USER_AGENT)
                     // 正常流程是表单页提交过来的，带上来源更像真实请求
                     .header("Referer", url)
@@ -324,18 +312,51 @@ class CasClient {
     private companion object {
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
-
-        /**
-         * 取不到真实定位时的兜底值。
-         *
-         * 页面脚本要求 position 非空才允许提交，而服务端对内容照单全收 ——
-         * 它只会把解析不出坐标的值存成空。所以这只是让请求形态合法，不是有效坐标。
-         */
-        const val NO_GEOLOCATION = "1,User denied Geolocation"
-
-        /** 同理。真实值是 FingerprintJS 的 visitorId，我们造不出来，也不需要。 */
-        val NO_FINGERPRINT: String = "0".repeat(32)
     }
+}
+
+// ---------------------------------------------------------------------- 提交体组装
+
+/**
+ * 取不到真实定位时的兜底值。
+ *
+ * 页面脚本要求 position 非空才允许提交，而服务端对内容照单全收 ——
+ * 它只会把解析不出坐标的值存成空。所以这只是让请求形态合法，不是有效坐标。
+ */
+private const val NO_GEOLOCATION = "1,User denied Geolocation"
+
+/** 同理。真实值是 FingerprintJS 的 visitorId，我们造不出来，也不需要。 */
+private val NO_FINGERPRINT: String = "0".repeat(32)
+
+/**
+ * 组装签到提交体。
+ *
+ * 单独抽出来是为了能测「**每个参数名只出现一次**」。
+ *
+ * 页面上的 `position` / `browserfp` 两个 input 值是空的（真值由页面脚本在提交前填）。
+ * 如果先把表单字段照抄一遍、再补一个自己的值，提交体里就会出现两个同名 `position` ——
+ * 一个是空串、一个是坐标，服务端取哪个全凭它自己的解析习惯。
+ * 代码上看不出问题（两个 `add` 隔了十几行），但线上就会表现成「明明拿到了坐标，
+ * 后台那一列却是空的」。所以这里就地替换，绝不追加。
+ */
+internal fun buildCheckInBody(fields: Map<String, String>, position: String): FormBody {
+    val builder = FormBody.Builder()
+
+    fields.forEach { (name, value) ->
+        when (name) {
+            "position" -> builder.add("position", value.ifEmpty { position.ifEmpty { NO_GEOLOCATION } })
+            "browserfp" -> builder.add("browserfp", value.ifEmpty { NO_FINGERPRINT })
+            else -> builder.add(name, value)
+        }
+    }
+
+    // 万一哪天页面上没有这两个 input，也得补上，别让请求少字段
+    if (!fields.containsKey("position")) {
+        builder.add("position", position.ifEmpty { NO_GEOLOCATION })
+    }
+    if (!fields.containsKey("browserfp")) builder.add("browserfp", NO_FINGERPRINT)
+
+    return builder.build()
 }
 
 // ---------------------------------------------------------------------- 结果判定

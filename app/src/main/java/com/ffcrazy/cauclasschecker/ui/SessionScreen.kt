@@ -172,6 +172,21 @@ private fun CheckInResultDialog(progress: CheckInProgress, onDismiss: () -> Unit
                     .heightIn(max = 380.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
+                // GPS 放最上面：教师端后台那一列是不是空的，全看这一行。
+                // 取不到要标红 —— 灰字和坐标长得太像，上一版就是这么被忽略掉的。
+                if (progress.gps.isNotEmpty()) {
+                    Text(
+                        "GPS：${progress.gps}",
+                        fontSize = 12.sp,
+                        fontWeight = if (progress.gpsOk) FontWeight.Normal else FontWeight.Medium,
+                        color = if (progress.gpsOk) Muted else ErrorRed,
+                        lineHeight = 17.sp,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    HorizontalDivider(color = Border, thickness = 1.dp)
+                    Spacer(Modifier.height(4.dp))
+                }
+
                 progress.outcomes.forEach { outcome ->
                     Row(
                         Modifier

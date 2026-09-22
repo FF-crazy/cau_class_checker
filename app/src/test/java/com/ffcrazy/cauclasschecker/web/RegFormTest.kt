@@ -176,4 +176,58 @@ class RegFormTest {
         val html = "<body><script>var x=1;</script><!-- 广告 -->签到成功</body>"
         assertEquals("签到成功", plainText(html))
     }
+
+    // ------------------------------------------------------------------ 提交体组装
+
+    private fun pairsOf(body: okhttp3.FormBody): List<Pair<String, String>> =
+        (0 until body.size).map { body.name(it) to body.value(it) }
+
+    /** 页面上 position / browserfp 两个 input 的值就是空的，真值由页面脚本填。 */
+    private val formFieldsInPageOrder = linkedMapOf(
+        "id" to "2023000000000",
+        "name" to "张三",
+        "nouse" to "因签到需要，请允许获取您的位置",
+        "position" to "",
+        "browserfp" to "",
+        "tel" to "",
+    )
+
+    @Test
+    fun `每个参数名只出现一次`() {
+        // 回归用例：曾经先把表单字段照抄一遍、再补一个自己的 position，
+        // 提交体里就出现了两个同名参数（空串在前、坐标在后），服务端取哪个全凭运气。
+        // 表现就是「明明拿到了坐标，教师端后台那一列却是空的」。
+        val pairs = pairsOf(buildCheckInBody(formFieldsInPageOrder, "116.353782,40.003695"))
+
+        assertEquals("参数名不能重复：$pairs", pairs.size, pairs.map { it.first }.toSet().size)
+        assertEquals(
+            "提交体里必须带的是真实坐标，不是空串",
+            "116.353782,40.003695",
+            pairs.single { it.first == "position" }.second,
+        )
+    }
+
+    @Test
+    fun `拿不到定位时退回非空占位符`() {
+        // 留空会被页面脚本的拦截逻辑挡住，所以兜底值也必须非空
+        val pairs = pairsOf(buildCheckInBody(formFieldsInPageOrder, ""))
+        assertTrue(pairs.single { it.first == "position" }.second.isNotEmpty())
+    }
+
+    @Test
+    fun `页面上没有这两个字段时也要补上`() {
+        val pairs = pairsOf(buildCheckInBody(mapOf("id" to "2023000000000"), "1.0,2.0"))
+        assertEquals("1.0,2.0", pairs.single { it.first == "position" }.second)
+        assertTrue("browserfp 也要补", pairs.any { it.first == "browserfp" })
+    }
+
+    @Test
+    fun `其它字段原样保留且顺序不变`() {
+        val pairs = pairsOf(buildCheckInBody(formFieldsInPageOrder, "1.0,2.0"))
+        assertEquals(
+            listOf("id", "name", "nouse", "position", "browserfp", "tel"),
+            pairs.map { it.first },
+        )
+        assertEquals("张三", pairs[1].second)
+    }
 }

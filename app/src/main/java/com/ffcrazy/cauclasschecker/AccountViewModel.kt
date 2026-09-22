@@ -32,6 +32,15 @@ data class CheckInProgress(
     val done: Int,
     val total: Int,
     val outcomes: List<CheckInOutcome> = emptyList(),
+    /**
+     * 本次用到的 GPS 坐标，或「未取到（原因）」。
+     *
+     * 摆到界面上是有意的：教师端后台那一列是不是空的，只有这里能提前看出来。
+     * 取不到时用户至少能知道该去打开定位开关还是改权限，而不是签完一脸茫然。
+     */
+    val gps: String = "",
+    /** [gps] 里是不是真坐标。false 表示那是「未取到（原因）」，界面要标红。 */
+    val gpsOk: Boolean = true,
 ) {
     val running: Boolean get() = done < total
 }
@@ -183,10 +192,16 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             // 先定位，再进循环 —— 一次定位够所有账号用
-            val position = Position.current(getApplication())
-            if (position == null) {
-                showMessage("没取到定位，本次签到不带 GPS 坐标", long = true)
+            val fix = Position.current(getApplication())
+            val position = (fix as? Position.Fix.Ok)?.text.orEmpty()
+            val gps = Position.describe(fix)
+            val gpsOk = fix is Position.Fix.Ok
+
+            // 失败要把原因说出来：只讲「没取到」，用户不知道该去开定位还是改权限
+            if (fix is Position.Fix.Unavailable) {
+                showMessage("没取到定位：${fix.reason}", long = true)
             }
+            _state.update { it.copy(checkIn = CheckInProgress(0, targets.size, gps = gps, gpsOk = gpsOk)) }
 
             val outcomes = mutableListOf<CheckInOutcome>()
 
@@ -196,12 +211,20 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     // 现算，保证用的是此刻的时间戳
                     val url = Sign.buildUrl(session.ip, session.ipt, Sign.nowSeconds())
-                    client.checkIn(account.cookies, url, position.orEmpty())
+                    client.checkIn(account.cookies, url, position)
                 }
 
                 outcomes += CheckInOutcome(account.username, result)
                 _state.update {
-                    it.copy(checkIn = CheckInProgress(index + 1, targets.size, outcomes.toList()))
+                    it.copy(
+                        checkIn = CheckInProgress(
+                            done = index + 1,
+                            total = targets.size,
+                            outcomes = outcomes.toList(),
+                            gps = gps,
+                            gpsOk = gpsOk,
+                        ),
+                    )
                 }
             }
 
@@ -217,7 +240,7 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
             _state.update {
                 it.copy(
                     accounts = repo.all(),
-                    checkIn = CheckInProgress(targets.size, targets.size, outcomes),
+                    checkIn = CheckInProgress(targets.size, targets.size, outcomes, gps, gpsOk),
                 )
             }
             showMessage("签到完成：$succeeded / ${outcomes.size} 个账号成功")

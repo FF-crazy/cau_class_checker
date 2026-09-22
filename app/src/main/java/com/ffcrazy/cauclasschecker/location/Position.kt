@@ -29,10 +29,25 @@ import kotlin.coroutines.resume
  * 手机在教室里，坐标就是那间教室的。写死一个坐标也能填满那一列，
  * 但那是伪造位置证据，性质完全不同 —— 这里不做。
  *
- * ## 只取一次
- * 一台设备一个坐标，多个账号共用同一个值 —— 本来就是同一台手机待在同一个位置。
+ * ## 失败必须说清楚原因
+ * 第一版只返回 null，结果「为什么没取到」被静默吞掉了：用户看到后台是空的，
+ * 却不知道该去打开定位开关、还是去改权限设置。所以现在失败也带原因。
  */
 object Position {
+
+    /** 取定位的结果。 */
+    sealed interface Fix {
+        /** 真实坐标，形如 `116.353782,40.003695`（**经度在前**）。 */
+        data class Ok(val text: String) : Fix
+
+        /** 没取到。[reason] 是可直接展示给用户的中文原因。 */
+        data class Unavailable(val reason: String) : Fix
+    }
+
+    const val REASON_PERMISSION = "没有定位权限"
+    const val REASON_SERVICES_OFF = "手机的定位服务是关着的"
+    const val REASON_TIMEOUT = "十几秒内没定上位"
+    const val REASON_NO_PROVIDER = "这台设备没有可用的定位源"
 
     /**
      * 服务端存下来的样子是 `116.353782,40.003695` —— **经度在前**。
@@ -43,6 +58,12 @@ object Position {
     fun format(longitude: Double, latitude: Double): String = "$longitude,$latitude"
 
     fun format(location: Location): String = format(location.longitude, location.latitude)
+
+    /** 展示用的一行字，直接放进签到结果弹窗。 */
+    fun describe(fix: Fix): String = when (fix) {
+        is Fix.Ok -> fix.text
+        is Fix.Unavailable -> "未取到（${fix.reason}）"
+    }
 
     fun hasPermission(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
@@ -58,24 +79,27 @@ object Position {
     private const val MAX_LAST_KNOWN_AGE_MS = 2 * 60 * 1000L
 
     /**
-     * 取一次当前位置。拿不到（没授权 / 定位关着 / 超时）返回 null。
+     * 取一次当前位置。
      *
-     * 调用方拿到 null 时**应当照常签到**，只是那一列会是空的 ——
+     * 调用方拿到 [Fix.Unavailable] 时**应当照常签到**，只是那一列会是空的 ——
      * 不能因为取不到坐标就放弃签到。
      */
-    suspend fun current(context: Context, timeoutMs: Long = 12_000L): String? {
-        if (!hasPermission(context)) return null
+    suspend fun current(context: Context, timeoutMs: Long = 12_000L): Fix {
+        if (!hasPermission(context)) return Fix.Unavailable(REASON_PERMISSION)
+
         return withContext(Dispatchers.IO) {
             val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-                ?: return@withContext null
+                ?: return@withContext Fix.Unavailable(REASON_NO_PROVIDER)
+
             val providers = enabledProviders(lm)
-            if (providers.isEmpty()) return@withContext null
+            if (providers.isEmpty()) return@withContext Fix.Unavailable(REASON_SERVICES_OFF)
 
             // 先用现成的：多数时候手机上已经有一份几分钟内的定位，瞬间可得，
             // 不必让用户在教室里站着等 GPS 冷启动
-            freshLastKnown(lm, providers)?.let { return@withContext format(it) }
+            freshLastKnown(lm, providers)?.let { return@withContext Fix.Ok(format(it)) }
 
-            withTimeoutOrNull(timeoutMs) { firstFix(lm, providers) }?.let(::format)
+            val found = withTimeoutOrNull(timeoutMs) { firstFix(lm, providers) }
+            if (found != null) Fix.Ok(format(found)) else Fix.Unavailable(REASON_TIMEOUT)
         }
     }
 
@@ -104,8 +128,11 @@ object Position {
     /**
      * 同时向所有可用 provider 要一次位置，**谁先给用谁**。
      *
-     * 不按顺序一个个试，是因为室内 GPS 可能几十秒都定不上；
-     * 而网络定位往往一秒就回来。并发要，最慢的那个就不必等。
+     * 不按顺序一个个试：室内 GPS 可能几十秒都定不上，而网络定位往往一秒就回来，
+     * 并发要就不必干等最慢的那个。
+     *
+     * 一个 provider 都没注册上时立刻返回 null，不耗满超时 —— 那种情况多半是
+     * 只有「大致位置」权限而 provider 又要精确定位，干等纯属浪费时间。
      */
     @SuppressLint("MissingPermission")
     private suspend fun firstFix(lm: LocationManager, providers: List<String>): Location? =
@@ -117,9 +144,18 @@ object Position {
                     if (cont.isActive) cont.resume(location)
                 }
             }
-            providers.forEach {
-                runCatching { lm.requestLocationUpdates(it, 0L, 0f, listener, Looper.getMainLooper()) }
+
+            val registered = providers.count {
+                runCatching {
+                    lm.requestLocationUpdates(it, 0L, 0f, listener, Looper.getMainLooper())
+                }.isSuccess
             }
+
+            if (registered == 0) {
+                if (cont.isActive) cont.resume(null)
+                return@suspendCancellableCoroutine
+            }
+
             cont.invokeOnCancellation { runCatching { lm.removeUpdates(listener) } }
         }
 }
