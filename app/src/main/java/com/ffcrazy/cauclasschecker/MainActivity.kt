@@ -156,7 +156,11 @@ private fun AppRoot(vm: CheckInViewModel, accountVm: AccountViewModel) {
                             // 有会话就自动进二级页面；扫码/相册/粘贴三条路都汇入 startSession
                             if (state.hasSession) {
                                 BackHandler { vm.clearSession() }
-                                SessionScreen(vm = vm, onBack = { vm.clearSession() })
+                                SessionScreen(
+                                    vm = vm,
+                                    accountVm = accountVm,
+                                    onBack = { vm.clearSession() },
+                                )
                             } else {
                                 AppHeader("我爱易签到")
                                 HomeScreen(

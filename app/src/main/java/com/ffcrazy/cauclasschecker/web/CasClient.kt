@@ -150,6 +150,101 @@ class CasClient {
             }
         }
 
+    // ------------------------------------------------------------------ 签到
+
+    /**
+     * 一次签到的结果。
+     *
+     * 每个分支都带 [detail]（服务端返回的原文摘要）—— 因为**我并不知道
+     * `casgeosig.php` 成功/失败时分别返回什么**，只能按关键词做尽力而为的判断，
+     * 认不出来时把原文交给用户，而不是猜一个结论。
+     */
+    sealed interface CheckInResult {
+        val detail: String
+
+        /** 服务端说成功了。 */
+        data class Success(override val detail: String) : CheckInResult
+
+        /** 这个账号已经签过了。不算失败，但要说清楚。 */
+        data class AlreadyDone(override val detail: String) : CheckInResult
+
+        /** 登录态失效，被踢回了 CAS —— 需要重新登录这个账号。 */
+        data class LoginExpired(override val detail: String) : CheckInResult
+
+        /** 服务端明确拒绝（码过期、参数不对等）。 */
+        data class Rejected(override val detail: String) : CheckInResult
+
+        /** 认不出来的响应。把原文给用户看。 */
+        data class Unknown(override val detail: String) : CheckInResult
+
+        /** 本地没存这个账号的会话，压根没发请求。 */
+        data class NoSession(override val detail: String) : CheckInResult
+
+        data class Network(override val detail: String) : CheckInResult
+
+        /** 是否算「签到没成」，界面据此显示红/灰。 */
+        val isFailure: Boolean
+            get() = this is LoginExpired || this is Rejected || this is Network || this is NoSession
+    }
+
+    /**
+     * 用某个账号**自己的** Cookie 发起一次签到。
+     *
+     * 每个账号调用一次，各自独立 —— 这正是分开存 Cookie 换来的能力。
+     * [url] 由调用方在**发请求前一刻**生成，因为 `t` 是按秒滚动的，
+     * 提前批量生成会让靠后的账号拿到过期的码。
+     */
+    suspend fun checkIn(cookies: List<StoredCookie>, url: String): CheckInResult =
+        withContext(Dispatchers.IO) {
+            try {
+                val http = httpWith(AccountCookieJar(cookies))
+                val request = Request.Builder()
+                    .url(url.toHttpUrl())
+                    .header("User-Agent", USER_AGENT)
+                    // 正常流程是从签到页点进来的，带上来源更像真实请求
+                    .header("Referer", CasLogin.SERVICE_ROOT)
+                    .build()
+
+                http.newCall(request).execute().use { response ->
+                    // 被踢回 CAS = 这个账号的登录态没了
+                    if (response.request.url.host.equals(CasLogin.CAS_HOST, ignoreCase = true)) {
+                        return@use CheckInResult.LoginExpired("登录态已失效")
+                    }
+                    val text = plainText(response.body?.string().orEmpty())
+                    classify(text)
+                }
+            } catch (e: Exception) {
+                CheckInResult.Network(networkMessage(e))
+            }
+        }
+
+    /**
+     * 按关键词判断签到结果。
+     *
+     * ⚠️ 这是**尽力而为**的启发式：我没见过真实响应。所以顺序很重要 ——
+     * 「已签到」要先于「签到成功」判断（「您已签到成功」同时含两个关键词，
+     * 但它其实是重复签到）。认不出来一律归为 [CheckInResult.Unknown] 并附上原文，
+     * 由人来看，而不是硬猜。
+     */
+    private fun classify(text: String): CheckInResult = when {
+        text.isBlank() -> CheckInResult.Unknown("（服务端返回了空内容）")
+        text.contains("已签到") || text.contains("重复签到") ->
+            CheckInResult.AlreadyDone(text)
+        text.contains("成功") -> CheckInResult.Success(text)
+        text.contains("过期") || text.contains("失效") || text.contains("超时") ->
+            CheckInResult.Rejected(text)
+        text.contains("失败") || text.contains("错误") || text.contains("无效") ->
+            CheckInResult.Rejected(text)
+        else -> CheckInResult.Unknown(text)
+    }
+
+    /** 去掉标签与多余空白，截断到可展示的长度。 */
+    private fun plainText(html: String): String =
+        html.replace(TAG_REGEX, " ")
+            .replace(WHITESPACE_REGEX, " ")
+            .trim()
+            .take(160)
+
     // ------------------------------------------------------------------ 错误诊断
 
     /**
@@ -207,5 +302,8 @@ class CasClient {
     private companion object {
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+
+        val TAG_REGEX = Regex("<[^>]+>")
+        val WHITESPACE_REGEX = Regex("\\s+")
     }
 }

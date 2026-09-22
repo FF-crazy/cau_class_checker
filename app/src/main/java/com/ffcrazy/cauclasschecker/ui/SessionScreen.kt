@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -51,8 +52,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ffcrazy.cauclasschecker.CheckInUiState
+import com.ffcrazy.cauclasschecker.AccountViewModel
+import com.ffcrazy.cauclasschecker.CheckInProgress
 import com.ffcrazy.cauclasschecker.CheckInViewModel
 import com.ffcrazy.cauclasschecker.qr.QrEncoder
+import com.ffcrazy.cauclasschecker.web.CasClient
 import com.ffcrazy.cauclasschecker.ui.theme.Border
 import com.ffcrazy.cauclasschecker.ui.theme.BoxBg
 import com.ffcrazy.cauclasschecker.ui.theme.ErrorRed
@@ -70,10 +74,12 @@ import com.ffcrazy.cauclasschecker.ui.theme.Muted
 @Composable
 fun SessionScreen(
     vm: CheckInViewModel,
+    accountVm: AccountViewModel,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val accountState by accountVm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val density = LocalDensity.current.density
 
@@ -110,9 +116,98 @@ fun SessionScreen(
 
             Spacer(Modifier.height(18.dp))
 
-            Controls(state = state, vm = vm, context = context)
+            Controls(
+                state = state,
+                vm = vm,
+                context = context,
+                accountCount = accountState.accounts.size,
+                onCheckInAll = { state.session?.let(accountVm::checkInAll) },
+            )
         }
     }
+
+    // 批量签到的进度与结果
+    accountState.checkIn?.let { progress ->
+        CheckInResultDialog(progress = progress, onDismiss = { accountVm.dismissCheckIn() })
+    }
+}
+
+/** 批量签到的结果弹窗。跑的过程中显示进度，不可关闭。 */
+@Composable
+private fun CheckInResultDialog(progress: CheckInProgress, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = { if (!progress.running) onDismiss() },
+        containerColor = Color.White,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Text(
+                if (progress.running) "正在签到…（${progress.done}/${progress.total}）"
+                else "签到结果（${progress.outcomes.count { !it.result.isFailure }}/${progress.total} 成功）",
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Ink,
+            )
+        },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 380.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                progress.outcomes.forEach { outcome ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 7.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Text(
+                            outcome.username,
+                            fontSize = 14.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Ink,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            statusLabel(outcome.result),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (outcome.result.isFailure) ErrorRed else GreenDeep,
+                        )
+                    }
+                    // 认不出来或被拒绝时，把服务端原文放出来 —— 不然用户不知道该找谁
+                    if (outcome.result is CasClient.CheckInResult.Unknown ||
+                        outcome.result is CasClient.CheckInResult.Rejected
+                    ) {
+                        Text(
+                            outcome.result.detail,
+                            fontSize = 11.sp,
+                            color = Muted,
+                            lineHeight = 16.sp,
+                            modifier = Modifier.padding(bottom = 6.dp, start = 2.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (!progress.running) {
+                TextButton(onClick = onDismiss) {
+                    Text("关闭", color = GreenDeep, fontWeight = FontWeight.Medium)
+                }
+            }
+        },
+    )
+}
+
+private fun statusLabel(result: CasClient.CheckInResult): String = when (result) {
+    is CasClient.CheckInResult.Success -> "成功"
+    is CasClient.CheckInResult.AlreadyDone -> "已签到"
+    is CasClient.CheckInResult.LoginExpired -> "登录已失效"
+    is CasClient.CheckInResult.Rejected -> "被拒绝"
+    is CasClient.CheckInResult.Unknown -> "未识别"
+    is CasClient.CheckInResult.NoSession -> "无会话"
+    is CasClient.CheckInResult.Network -> "网络错误"
 }
 
 @Composable
@@ -215,7 +310,13 @@ private fun MetaRow(label: String, value: String) {
 }
 
 @Composable
-private fun Controls(state: CheckInUiState, vm: CheckInViewModel, context: Context) {
+private fun Controls(
+    state: CheckInUiState,
+    vm: CheckInViewModel,
+    context: Context,
+    accountCount: Int,
+    onCheckInAll: () -> Unit,
+) {
     val enabled = state.hasSession
     Column {
         Button(
@@ -248,6 +349,13 @@ private fun Controls(state: CheckInUiState, vm: CheckInViewModel, context: Conte
 
         SecondaryButton("分享链接", enabled, Modifier.fillMaxWidth()) {
             shareUrl(context, state.url)
+        }
+
+        if (accountCount > 0) {
+            Spacer(Modifier.height(10.dp))
+            SecondaryButton("全部签到（$accountCount 个账号）", enabled, Modifier.fillMaxWidth()) {
+                onCheckInAll()
+            }
         }
 
         Spacer(Modifier.height(10.dp))
@@ -301,10 +409,10 @@ private fun shareUrl(context: Context, url: String) {
 }
 
 /**
- * 暂时用系统浏览器打开。
+ * 用系统浏览器打开签到链接。
  *
- * 下一步换成 App 内 WebView —— 那样才能和统一身份认证共享 Cookie，
- * 现在这样跳出去是拿不到登录态的。
+ * 注意这条**不会**带上你在 App 里登录的会话 —— 浏览器有自己的 Cookie。
+ * 要真正完成签到请用「全部签到」，那个走的是 App 内已保存的账号凭证。
  */
 private fun openUrl(context: Context, url: String) {
     if (url.isEmpty()) return

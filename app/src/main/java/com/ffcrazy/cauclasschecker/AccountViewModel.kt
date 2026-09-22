@@ -3,6 +3,8 @@ package com.ffcrazy.cauclasschecker
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.ffcrazy.cauclasschecker.domain.Session
+import com.ffcrazy.cauclasschecker.domain.Sign
 import com.ffcrazy.cauclasschecker.web.AccountRecord
 import com.ffcrazy.cauclasschecker.web.AccountRepository
 import com.ffcrazy.cauclasschecker.web.CasClient
@@ -18,6 +20,21 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
+/** 批量签到时，单个账号的结果。 */
+data class CheckInOutcome(
+    val username: String,
+    val result: CasClient.CheckInResult,
+)
+
+/** 批量签到的进度与结果。[done] < [total] 表示还在跑。 */
+data class CheckInProgress(
+    val done: Int,
+    val total: Int,
+    val outcomes: List<CheckInOutcome> = emptyList(),
+) {
+    val running: Boolean get() = done < total
+}
+
 data class AccountUiState(
     /** 登录过的账号。每条的 [AccountRecord.valid] 决定界面样式。 */
     val accounts: List<AccountRecord> = emptyList(),
@@ -26,6 +43,8 @@ data class AccountUiState(
     val onLoginScreen: Boolean = false,
     /** 二级登录页预填的账号（从列表点进来时带上）。 */
     val prefillUsername: String = "",
+    /** 非 null 表示正在批量签到或已有结果待查看。 */
+    val checkIn: CheckInProgress? = null,
 )
 
 /**
@@ -136,6 +155,67 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun updateValidity(username: String, valid: Boolean) {
         _state.update { it.copy(accounts = repo.setValidity(username, valid)) }
+    }
+
+    // ------------------------------------------------------------------ 批量签到
+
+    /**
+     * 用所有账号各签一次到。
+     *
+     * 关键点：**每个账号发请求前才现算 URL**。`t` 是按秒滚动的，
+     * 若先把 15 条 URL 一次性生成好再逐个发，靠后的账号拿到的码可能已经过期。
+     *
+     * 串行发送而不是并发：账号数量很少（不超过 15），串行更温和，
+     * 也不容易触发服务端的频率限制；界面有进度可看，不会显得卡住。
+     */
+    fun checkInAll(session: Session) {
+        val targets = _state.value.accounts
+        if (targets.isEmpty()) {
+            showMessage("还没有登录任何账号")
+            return
+        }
+
+        _state.update { it.copy(checkIn = CheckInProgress(0, targets.size)) }
+
+        viewModelScope.launch {
+            val outcomes = mutableListOf<CheckInOutcome>()
+
+            for ((index, account) in targets.withIndex()) {
+                val result = if (account.cookies.isEmpty()) {
+                    CasClient.CheckInResult.NoSession("没有可用的会话，需要重新登录")
+                } else {
+                    // 现算，保证用的是此刻的时间戳
+                    val url = Sign.buildUrl(session.ip, session.ipt, Sign.nowSeconds())
+                    client.checkIn(account.cookies, url)
+                }
+
+                outcomes += CheckInOutcome(account.username, result)
+                _state.update {
+                    it.copy(checkIn = CheckInProgress(index + 1, targets.size, outcomes.toList()))
+                }
+            }
+
+            // 登录态确实没了的，顺手把标记改掉，免得列表还显示绿色
+            outcomes.forEach { outcome ->
+                val r = outcome.result
+                if (r is CasClient.CheckInResult.LoginExpired || r is CasClient.CheckInResult.NoSession) {
+                    repo.setValidity(outcome.username, false)
+                }
+            }
+
+            val succeeded = outcomes.count { !it.result.isFailure }
+            _state.update {
+                it.copy(
+                    accounts = repo.all(),
+                    checkIn = CheckInProgress(targets.size, targets.size, outcomes),
+                )
+            }
+            showMessage("签到完成：$succeeded / ${outcomes.size} 个账号成功")
+        }
+    }
+
+    fun dismissCheckIn() {
+        _state.update { it.copy(checkIn = null) }
     }
 
     // ------------------------------------------------------------------ 删除
