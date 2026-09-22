@@ -59,12 +59,6 @@ object Position {
 
     fun format(location: Location): String = format(location.longitude, location.latitude)
 
-    /** 展示用的一行字，直接放进签到结果弹窗。 */
-    fun describe(fix: Fix): String = when (fix) {
-        is Fix.Ok -> fix.text
-        is Fix.Unavailable -> "未取到（${fix.reason}）"
-    }
-
     fun hasPermission(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED ||
