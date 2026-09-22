@@ -70,7 +70,7 @@ import com.ffcrazy.cauclasschecker.ui.theme.Green
 import com.ffcrazy.cauclasschecker.ui.theme.GreenDeep
 import com.ffcrazy.cauclasschecker.ui.theme.Ink
 import com.ffcrazy.cauclasschecker.ui.theme.Muted
-import com.ffcrazy.cauclasschecker.web.StoredAccount
+import com.ffcrazy.cauclasschecker.web.AccountRecord
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -165,11 +165,8 @@ private fun AccountListScreen(state: AccountUiState, vm: AccountViewModel, modif
             title = { Text("删除账号", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink) },
             text = {
                 Text(
-                    if (name == state.activeUser) {
-                        "删除 $name？它当前正在登录，删除后会一并退出登录。"
-                    } else {
-                        "从清单里移除 $name？账号本身不受影响，随时可以重新登录。"
-                    },
+                    "删除 $name？会连同它的登录凭证一起删掉，其它账号不受影响。\n" +
+                        "想再用得重新登录。",
                     fontSize = 14.sp,
                     color = Ink,
                     lineHeight = 21.sp,
@@ -235,7 +232,7 @@ private fun EmptyHint() {
  * - **失效**（Cookie 被顶掉或过期）：整卡灰化、文字一并变灰，右侧标「已失效」
  */
 @Composable
-private fun AccountCard(account: StoredAccount, onClick: () -> Unit) {
+private fun AccountCard(account: AccountRecord, onClick: () -> Unit) {
     val valid = account.valid
 
     Card(

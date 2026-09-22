@@ -3,12 +3,11 @@ package com.ffcrazy.cauclasschecker
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.ffcrazy.cauclasschecker.web.AccountList
-import com.ffcrazy.cauclasschecker.web.AccountStore
+import com.ffcrazy.cauclasschecker.web.AccountRecord
+import com.ffcrazy.cauclasschecker.web.AccountRepository
 import com.ffcrazy.cauclasschecker.web.CasClient
 import com.ffcrazy.cauclasschecker.web.LoginResult
-import com.ffcrazy.cauclasschecker.web.PersistentCookieJar
-import com.ffcrazy.cauclasschecker.web.StoredAccount
+import com.ffcrazy.cauclasschecker.web.SecureAccountFile
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,10 +19,8 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 data class AccountUiState(
-    /** 登录过的账号，按最近登录时间倒序。每条的 [StoredAccount.valid] 决定界面样式。 */
-    val accounts: List<StoredAccount> = emptyList(),
-    /** 当前持有会话的账号；null 表示没有。 */
-    val activeUser: String? = null,
+    /** 登录过的账号。每条的 [AccountRecord.valid] 决定界面样式。 */
+    val accounts: List<AccountRecord> = emptyList(),
     val busy: Boolean = false,
     /** true 表示正在二级登录页。 */
     val onLoginScreen: Boolean = false,
@@ -34,51 +31,27 @@ data class AccountUiState(
 /**
  * 账号管理。
  *
- * ## 为什么是「账号清单」而不是「多账号同时在线」
- * `class.cau.edu.cn` 只有一个 `PHPSESSID`，服务端对同一客户端只维持一条会话 ——
- * 任何时刻只可能有一个账号处于登录态。加上我们不保存密码，切换到另一个账号
- * 必然要重新输入。
+ * ## 多账号同时有效
+ * 每个账号保存**自己的**一份会话 Cookie。`class.cau.edu.cn` 用 PHP 的
+ * `PHPSESSID`，服务端按它区分会话，所以多个账号可以同时处于登录态 ——
+ * 各账号互不干扰，这也是「多账号一起签到」的前提。
  *
- * 所以清单里的 [StoredAccount.valid] 本质上是「**这个账号现在有没有可用会话**」：
- * 新登录的账号是有效的，之前那个会被标成已失效（它的会话确实被顶掉了）。
+ * 账号清单连同 Cookie 一起加密落盘（Keystore 的 AES-GCM 密钥），不引数据库。
  */
 class AccountViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val store = AccountStore(app)
-    private val cookieJar = PersistentCookieJar(File(app.filesDir, COOKIE_FILE))
-    private val client = CasClient(cookieJar)
+    private val repo = AccountRepository(SecureAccountFile(File(app.filesDir, ACCOUNT_FILE)))
 
-    private val _state = MutableStateFlow(AccountUiState())
+    private val client = CasClient()
+
+    private val _state = MutableStateFlow(AccountUiState(accounts = repo.all()))
     val state: StateFlow<AccountUiState> = _state.asStateFlow()
 
     private val _messages = Channel<UiMessage>(Channel.BUFFERED)
     val messages: Flow<UiMessage> = _messages.receiveAsFlow()
 
-    init {
-        val remembered = store.activeUser
-        // 只检查本地 Cookie 还在不在 —— 服务端认不认要等「验活」才知道，
-        // 启动时不该为了这个多发一次网络请求。
-        val hasSession = remembered != null && client.looksLoggedIn()
-        if (remembered != null && !hasSession) {
-            store.activeUser = null
-        }
-
-        val saved = store.load()
-        val accounts = if (hasSession) {
-            AccountList.invalidateAllExcept(saved, remembered!!)
-        } else {
-            // 本地没有会话，那么所有账号都不可能是有效的
-            saved.map { it.copy(valid = false) }
-        }
-        store.save(accounts)
-        _state.update {
-            it.copy(accounts = accounts, activeUser = if (hasSession) remembered else null)
-        }
-    }
-
     // ------------------------------------------------------------------ 页面流转
 
-    /** 打开二级登录页。[prefill] 用于从列表点某个账号时带上用户名。 */
     fun openLogin(prefill: String = "") {
         _state.update { it.copy(onLoginScreen = true, prefillUsername = prefill) }
     }
@@ -101,17 +74,15 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             when (val result = client.login(name, password)) {
                 is LoginResult.Success -> {
-                    // 同一账号后覆盖前；服务端只有一条会话，
-                    // 所以其余账号的会话确实被顶掉了，标记为失效是事实而非猜测
-                    val upserted = store.upsert(result.username, System.currentTimeMillis())
-                    val accounts = AccountList.invalidateAllExcept(upserted, result.username)
-                    store.save(accounts)
-                    store.activeUser = result.username
-
+                    // 只写入这个账号自己的会话，其它账号纹丝不动
+                    val accounts = repo.saveSession(
+                        result.username,
+                        result.cookies,
+                        System.currentTimeMillis(),
+                    )
                     _state.update {
                         it.copy(
                             accounts = accounts,
-                            activeUser = result.username,
                             busy = false,
                             onLoginScreen = false,
                             prefillUsername = "",
@@ -132,34 +103,28 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------------ 验活
 
     /**
-     * 验活：确认这个账号的 Cookie 还有没有效。
+     * 验活：用这个账号**自己的** Cookie 探测会话是否还有效。
      *
-     * 只有持有会话的那个账号才谈得上验活 —— 服务端一次只维持一条会话，
-     * 其它账号本来就没有会话可用。对它们直接判失效，而不是拿当前会话的
-     * 探测结果去张冠李戴。
+     * 每个账号独立验证，互不影响 —— 这正是分开存 Cookie 换来的能力。
      */
     fun verify(username: String) {
-        if (username != _state.value.activeUser) {
-            setValidity(username, false)
-            showMessage(
-                "$username 没有可用会话（服务端一次只维持一条），已标记为失效",
-                long = true,
-            )
+        val record = repo.find(username) ?: return
+
+        if (record.cookies.isEmpty()) {
+            updateValidity(username, false)
+            showMessage("$username 没有可用的会话，需要重新登录", long = true)
             return
         }
 
         viewModelScope.launch {
-            when (val probe = client.probeSession()) {
+            when (val probe = client.probeSession(record.cookies)) {
                 is CasClient.SessionProbe.Alive -> {
-                    setValidity(username, true)
+                    updateValidity(username, true)
                     showMessage("$username 的 Cookie 仍然有效")
                 }
 
                 is CasClient.SessionProbe.Expired -> {
-                    setValidity(username, false)
-                    client.logout()
-                    store.activeUser = null
-                    _state.update { it.copy(activeUser = null) }
+                    updateValidity(username, false)
                     showMessage("$username 的 Cookie 已失效，需要重新登录", long = true)
                 }
 
@@ -169,34 +134,19 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun setValidity(username: String, valid: Boolean) {
-        val accounts = AccountList.withValidity(_state.value.accounts, username, valid)
-        store.save(accounts)
-        _state.update { it.copy(accounts = accounts) }
+    private fun updateValidity(username: String, valid: Boolean) {
+        _state.update { it.copy(accounts = repo.setValidity(username, valid)) }
     }
 
-    // ------------------------------------------------------------------ 退出 / 删除
+    // ------------------------------------------------------------------ 删除
 
-    fun logout() {
-        client.logout()
-        store.activeUser = null
-        val accounts = _state.value.accounts.map { it.copy(valid = false) }
-        store.save(accounts)
-        _state.update { it.copy(activeUser = null, accounts = accounts) }
-        showMessage("已退出登录")
-    }
-
-    /** 从清单里删掉一个账号。 */
+    /**
+     * 从清单里删掉一个账号 —— 连同它自己的会话 Cookie 一起删除。
+     * 其它账号完全不受影响。
+     */
     fun removeAccount(username: String) {
-        val wasActive = _state.value.activeUser == username
-        if (wasActive) {
-            client.logout()
-            store.activeUser = null
-        }
-        val accounts = store.remove(username)
-        _state.update {
-            it.copy(accounts = accounts, activeUser = if (wasActive) null else it.activeUser)
-        }
+        val accounts = repo.remove(username)
+        _state.update { it.copy(accounts = accounts) }
         showMessage("已删除账号 $username")
     }
 
@@ -205,6 +155,6 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
-        const val COOKIE_FILE = "cas-cookies.txt"
+        const val ACCOUNT_FILE = "accounts.enc"
     }
 }
