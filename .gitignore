@@ -33,3 +33,6 @@ google-services.json
 
 # macOS
 .DS_Store
+
+# 签名配置（含密钥口令）—— 绝不入库
+keystore.properties
