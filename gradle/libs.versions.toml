@@ -9,6 +9,14 @@ activityCompose = "1.8.0"
 kotlin = "2.2.10"
 composeBom = "2026.02.01"
 
+# 扫码 / 二维码生成。ZXing 纯 Java、零传递依赖、不依赖 Google Play 服务，
+# 国内外手机通吃 —— 这是选它而非 ML Kit 的核心原因。
+zxing = "3.5.4"
+
+# 相机。1.6.2 修了一个在较新 JDK 上解析 JSpecify 注解时崩溃的问题，
+# 对本项目（JDK 25）直接相关，所以锁死这个版本。
+camera = "1.6.2"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -25,7 +33,11 @@ androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camera" }
+androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camera" }
+androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camera" }
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-
