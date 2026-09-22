@@ -52,6 +52,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -59,6 +61,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ffcrazy.cauclasschecker.R
 import com.ffcrazy.cauclasschecker.AccountUiState
 import com.ffcrazy.cauclasschecker.AccountViewModel
 import com.ffcrazy.cauclasschecker.ui.theme.Border
@@ -75,9 +78,9 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/** 左滑露出的操作区总宽度（每个按钮 74dp，两个）。 */
-private val ACTIONS_WIDTH = 148.dp
-private val ACTION_BUTTON_WIDTH = 74.dp
+/** 左滑露出的操作区：两个 42dp 圆形图标按钮 + 间距 + 右侧留白。 */
+private val ACTION_SIZE = 42.dp
+private val ACTIONS_WIDTH = 100.dp
 
 @Composable
 fun AccountScreen(state: AccountUiState, vm: AccountViewModel, modifier: Modifier = Modifier) {
@@ -99,7 +102,8 @@ private fun AccountListScreen(state: AccountUiState, vm: AccountViewModel, modif
     Column(modifier.fillMaxSize()) {
         AppHeader("账号管理")
 
-        Box(Modifier.fillMaxSize()) {
+        // weight 而不是 fillMaxSize：底部要给提示文字留出固定位置
+        Box(Modifier.weight(1f)) {
             if (state.accounts.isEmpty()) {
                 EmptyHint()
             } else {
@@ -116,11 +120,19 @@ private fun AccountListScreen(state: AccountUiState, vm: AccountViewModel, modif
                             },
                             actionsWidth = ACTIONS_WIDTH,
                             actions = {
-                                SwipeAction("验活", GreenDeep) {
+                                SwipeAction(
+                                    icon = painterResource(R.drawable.ic_flask),
+                                    contentDescription = "验活",
+                                    background = Green,
+                                ) {
                                     revealedUser = null
                                     vm.verify(account.username)
                                 }
-                                SwipeAction("删除", MaterialTheme.colorScheme.error) {
+                                SwipeAction(
+                                    icon = painterResource(R.drawable.ic_delete),
+                                    contentDescription = "删除",
+                                    background = MaterialTheme.colorScheme.error,
+                                ) {
                                     revealedUser = null
                                     pendingDelete = account.username
                                 }
@@ -155,6 +167,16 @@ private fun AccountListScreen(state: AccountUiState, vm: AccountViewModel, modif
                 Icon(Icons.Filled.Add, contentDescription = "添加账号")
             }
         }
+
+        Text(
+            "对胶囊左划进行管理",
+            fontSize = 12.sp,
+            color = Muted.copy(alpha = 0.45f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 14.dp),
+        )
     }
 
     pendingDelete?.let { name ->
@@ -189,19 +211,30 @@ private fun AccountListScreen(state: AccountUiState, vm: AccountViewModel, modif
     }
 }
 
+/** 左滑露出的单个操作：42dp 圆形按钮 + 白色图标。 */
 @Composable
-private fun RowScope.SwipeAction(label: String, color: Color, onClick: () -> Unit) {
+private fun RowScope.SwipeAction(
+    icon: Painter,
+    contentDescription: String,
+    background: Color,
+    onClick: () -> Unit,
+) {
     Box(
         Modifier
-            .fillMaxHeight()
-            .width(ACTION_BUTTON_WIDTH)
-            .padding(start = 4.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(color)
+            .align(Alignment.CenterVertically)
+            .padding(start = 8.dp)
+            .size(ACTION_SIZE)
+            .clip(CircleShape)
+            .background(background)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Icon(
+            painter = icon,
+            contentDescription = contentDescription,
+            tint = Color.White,
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 
