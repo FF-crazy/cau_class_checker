@@ -257,6 +257,10 @@ app/src/main/java/com/ffcrazy/cauclasschecker/
   重复的同名参数、`#errormsghide`、PC-1 的 D 半段）全都只有「为什么」讲得清；
   这些知识一旦退化成「照着这样写」，下一个改动的人就会把它改回去。
 - **不要删 `buildCheckInBody` 的回归用例** —— 它钉的是真 bug，不是形式主义。
+- **图标只有自适应图标一套**（`mipmap-anydpi/ic_launcher[.round].xml`），
+  位图本体是 `drawable-nodpi/ic_launcher_cat.png`。minSdk 29 > 26，
+  传统密度图标（`mipmap-*/ic_launcher.webp`）永远不会被选中，已经删掉了 ——
+  **不要再生成它们**。改图标只要换那张 nodpi 位图。
 - 改网络层时留意：请求头应尽量贴近真实手机 Chrome（见 `CasClient.asBrowser`），
   但**不要手工设 `Accept-Encoding`** —— OkHttp 自己会加 gzip 并自动解压，
   写上 `br`/`zstd` 会让它拿到解不开的内容。

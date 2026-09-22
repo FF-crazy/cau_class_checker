@@ -2,5 +2,5 @@
 <resources>
     <!-- App 只有中文一种语言，界面文案直接写在 Compose 里；
          这里只放必须由清单/系统读取的项。 -->
-    <string name="app_name">我爱易签到</string>
+    <string name="app_name">早八之恨</string>
 </resources>
