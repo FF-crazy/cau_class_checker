@@ -172,10 +172,9 @@ private fun AppRoot(vm: CheckInViewModel) {
                             AccountScreen()
                         }
 
-                        AppTab.ABOUT -> Column(Modifier.fillMaxSize()) {
-                            AppHeader("关于")
-                            AboutScreen()
-                        }
+                        // 「关于」自带顶栏：它内部还有「开源协议」二级页，
+                        // 顶栏要跟着切换，所以不在这里包 AppHeader
+                        AppTab.ABOUT -> AboutScreen()
                     }
                 }
             }
