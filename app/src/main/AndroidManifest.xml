@@ -12,6 +12,14 @@
         android:name="android.hardware.camera.any"
         android:required="false" />
 
+    <!-- CameraX 的清单会把 android.hardware.camera 合并成 required=true，
+         导致没摄像头的平板/Chromebook 装不上。这个 App 的核心能力
+         （粘贴链接 → 生成二维码）根本不需要相机，所以显式改回非必需。 -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false"
+        tools:replace="android:required" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
