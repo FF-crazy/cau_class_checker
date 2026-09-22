@@ -421,9 +421,11 @@ private fun Controls(
 ) {
     val enabled = state.hasSession
     Column {
+        // 主操作放最上面、用主色 —— 这一页的目的就是把到签掉，其余都是辅助。
+        // 没有账号时置灰而不是藏起来：藏起来用户不知道该先去加账号。
         Button(
-            onClick = { openUrl(context, state.url) },
-            enabled = enabled,
+            onClick = onCheckInAll,
+            enabled = enabled && accountCount > 0,
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 52.dp),
@@ -434,7 +436,13 @@ private fun Controls(
                 disabledContainerColor = Green.copy(alpha = 0.4f),
             ),
         ) {
-            Text("打开签到链接", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("全部签到（$accountCount 个账号）", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        SecondaryButton("打开签到链接", enabled, Modifier.fillMaxWidth()) {
+            openUrl(context, state.url)
         }
 
         Spacer(Modifier.height(10.dp))
@@ -451,13 +459,6 @@ private fun Controls(
 
         SecondaryButton("分享链接", enabled, Modifier.fillMaxWidth()) {
             shareUrl(context, state.url)
-        }
-
-        if (accountCount > 0) {
-            Spacer(Modifier.height(10.dp))
-            SecondaryButton("全部签到（$accountCount 个账号）", enabled, Modifier.fillMaxWidth()) {
-                onCheckInAll()
-            }
         }
 
         Spacer(Modifier.height(10.dp))
@@ -487,7 +488,14 @@ private fun SecondaryButton(
         modifier = modifier.heightIn(min = 48.dp),
         shape = RoundedCornerShape(10.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, Border),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink),
+        // 显式白底：页面底色是 #F6F7F6 的浅灰，留透明的话这些按钮会跟着发灰，
+        // 和主色的绿块分不出层次
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = Color.White,
+            contentColor = Ink,
+            disabledContainerColor = Color.White.copy(alpha = 0.6f),
+            disabledContentColor = Muted.copy(alpha = 0.6f),
+        ),
     ) {
         Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
