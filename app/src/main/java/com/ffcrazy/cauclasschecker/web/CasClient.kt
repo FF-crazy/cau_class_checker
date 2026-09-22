@@ -174,6 +174,15 @@ class CasClient {
         /** 服务端明确拒绝（码过期、参数不对、签到会话超时等）。 */
         data class Rejected(override val detail: String) : CheckInResult
 
+        /**
+         * 用户手动跳过。
+         *
+         * 只出现在「手动签到（逐个点）」里 —— 卡住了，或者不想签这个账号。
+         * 和 [Rejected] 分开是因为界面上的说法完全不同：「被拒绝」会让用户
+         * 以为服务端有问题，实际那是他自己按的跳过。
+         */
+        data class Skipped(override val detail: String) : CheckInResult
+
         /** 认不出来的响应。把原文给用户看。 */
         data class Unknown(override val detail: String) : CheckInResult
 
@@ -184,7 +193,8 @@ class CasClient {
 
         /** 是否算「签到没成」，界面据此显示红/绿。 */
         val isFailure: Boolean
-            get() = this is LoginExpired || this is Rejected || this is Network || this is NoSession
+            get() = this is LoginExpired || this is Rejected ||
+                this is Skipped || this is Network || this is NoSession
     }
 
     /**

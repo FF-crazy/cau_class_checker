@@ -183,6 +183,7 @@ fun SessionScreen(
                 context = context,
                 accountCount = accountState.accounts.size,
                 onCheckInAll = startCheckIn,
+                onManualCheckIn = { accountVm.startManualCheckIn() },
             )
         }
     }
@@ -306,6 +307,7 @@ private fun statusLabel(result: CasClient.CheckInResult): String = when (result)
     is CasClient.CheckInResult.Success -> "成功"
     is CasClient.CheckInResult.AlreadyDone -> "已签到"
     is CasClient.CheckInResult.LoginExpired -> "登录已失效"
+    is CasClient.CheckInResult.Skipped -> "已跳过"
     is CasClient.CheckInResult.Rejected -> "被拒绝"
     is CasClient.CheckInResult.Unknown -> "未识别"
     is CasClient.CheckInResult.NoSession -> "无会话"
@@ -418,6 +420,7 @@ private fun Controls(
     context: Context,
     accountCount: Int,
     onCheckInAll: () -> Unit,
+    onManualCheckIn: () -> Unit,
 ) {
     val enabled = state.hasSession
     Column {
@@ -437,6 +440,19 @@ private fun Controls(
             ),
         ) {
             Text("全部签到（$accountCount 个账号）", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // 托底：无头签到万一走不通（服务端改了、要人机交互），
+        // 还能退回「拿这个账号的 Cookie 开一个 WebView，自己点一下」。
+        // 慢，但只要能上网就能用 —— 所以放在主操作正下方，位置显眼但不抢主色。
+        SecondaryButton(
+            "手动签到（逐个点）",
+            enabled && accountCount > 0,
+            Modifier.fillMaxWidth(),
+        ) {
+            onManualCheckIn()
         }
 
         Spacer(Modifier.height(10.dp))

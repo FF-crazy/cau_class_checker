@@ -45,6 +45,7 @@ import com.ffcrazy.cauclasschecker.ui.AboutScreen
 import com.ffcrazy.cauclasschecker.ui.AccountScreen
 import com.ffcrazy.cauclasschecker.ui.AppHeader
 import com.ffcrazy.cauclasschecker.ui.HomeScreen
+import com.ffcrazy.cauclasschecker.ui.ManualCheckInScreen
 import com.ffcrazy.cauclasschecker.ui.SessionScreen
 import com.ffcrazy.cauclasschecker.ui.theme.CauCheckInTheme
 import com.ffcrazy.cauclasschecker.ui.theme.GreenDeep
@@ -153,21 +154,37 @@ private fun AppRoot(vm: CheckInViewModel, accountVm: AccountViewModel) {
                 ) {
                     when (tab) {
                         AppTab.CHECK_IN -> Column(Modifier.fillMaxSize()) {
-                            // 有会话就自动进二级页面；扫码/相册/粘贴三条路都汇入 startSession
-                            if (state.hasSession) {
-                                BackHandler { vm.clearSession() }
-                                SessionScreen(
-                                    vm = vm,
-                                    accountVm = accountVm,
-                                    onBack = { vm.clearSession() },
-                                )
-                            } else {
-                                AppHeader("我爱易签到")
-                                HomeScreen(
-                                    state = state,
-                                    vm = vm,
-                                    onOpenScanner = { scanning = true },
-                                )
+                            when {
+                                // 手动签到（逐个点）是一层全屏覆盖，自带顶栏。
+                                // 队列走完时 reportManual 会把 manual 清空，
+                                // 于是自动退回二维码页 —— 汇总弹窗正好在那儿等着显示。
+                                accountState.manual != null -> {
+                                    BackHandler { accountVm.dismissManual() }
+                                    ManualCheckInScreen(
+                                        vm = vm,
+                                        accountVm = accountVm,
+                                        onExit = { accountVm.dismissManual() },
+                                    )
+                                }
+
+                                // 有会话就自动进二级页面；扫码/相册/粘贴三条路都汇入 startSession
+                                state.hasSession -> {
+                                    BackHandler { vm.clearSession() }
+                                    SessionScreen(
+                                        vm = vm,
+                                        accountVm = accountVm,
+                                        onBack = { vm.clearSession() },
+                                    )
+                                }
+
+                                else -> {
+                                    AppHeader("我爱易签到")
+                                    HomeScreen(
+                                        state = state,
+                                        vm = vm,
+                                        onOpenScanner = { scanning = true },
+                                    )
+                                }
                             }
                         }
 

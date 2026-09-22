@@ -36,6 +36,27 @@ data class CheckInProgress(
     val running: Boolean get() = done < total
 }
 
+/**
+ * 「手动签到（逐个点）」的队列状态。
+ *
+ * 这是**托底**：无头 HTTP 那条路万一走不通（服务端改了、要人机交互、
+ * 需要图形验证码），还能退回「拿这个账号的 Cookie 开一个 WebView，自己点一下」。
+ * 慢，但只要能上网就能用。
+ */
+data class ManualCheckIn(
+    /** 待逐个走的账号，按顺序。 */
+    val queue: List<AccountRecord>,
+    /** 当前走到第几个。等于 [queue].size 表示走完了。 */
+    val index: Int = 0,
+    val outcomes: List<CheckInOutcome> = emptyList(),
+) {
+    val current: AccountRecord? get() = queue.getOrNull(index)
+    val total: Int get() = queue.size
+
+    /** 界面上的「第几个」，从 1 起。 */
+    val position: Int get() = (index + 1).coerceAtMost(total)
+}
+
 data class AccountUiState(
     /** 登录过的账号。每条的 [AccountRecord.valid] 决定界面样式。 */
     val accounts: List<AccountRecord> = emptyList(),
@@ -46,6 +67,8 @@ data class AccountUiState(
     val prefillUsername: String = "",
     /** 非 null 表示正在批量签到或已有结果待查看。 */
     val checkIn: CheckInProgress? = null,
+    /** 非 null 表示正在「手动签到（逐个点）」。走完会自动清空，把结果交给 [checkIn]。 */
+    val manual: ManualCheckIn? = null,
 )
 
 /**
@@ -242,6 +265,74 @@ class AccountViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissCheckIn() {
         _state.update { it.copy(checkIn = null) }
     }
+
+    // ------------------------------------------------------------------ 手动签到（逐个点）
+
+    /**
+     * 开始逐个手动签到。
+     *
+     * 队列里**只排除完全没有 Cookie 的账号** —— 那种连打开都没意义。
+     * 已经被标记为失效的**照样排进去**：那个标记可能是旧的，真实情况让服务端说了算
+     * （WebView 落在 CAS 上才算数，见 ManualCheckInScreen）。这比拿一个缓存的
+     * 布尔值替用户做决定要老实。
+     */
+    fun startManualCheckIn() {
+        val targets = _state.value.accounts.filter { it.cookies.isNotEmpty() }
+        if (targets.isEmpty()) {
+            showMessage("还没有登录任何账号")
+            return
+        }
+        val skipped = _state.value.accounts.size - targets.size
+        if (skipped > 0) showMessage("已跳过 $skipped 个没有会话的账号", long = true)
+        _state.update { it.copy(manual = ManualCheckIn(queue = targets)) }
+    }
+
+    /** 记录当前账号的结果，然后前进；走完了就把汇总交给签到结果弹窗。 */
+    fun reportManual(result: CasClient.CheckInResult) {
+        val manual = _state.value.manual ?: return
+        val account = manual.current ?: return
+
+        // 登录态确实没了的，顺手把标记改掉，免得列表还显示绿色
+        if (result is CasClient.CheckInResult.LoginExpired) {
+            repo.setValidity(account.username, false)
+        }
+
+        val outcomes = manual.outcomes + CheckInOutcome(account.username, result)
+        val next = manual.index + 1
+
+        if (next < manual.queue.size) {
+            _state.update { it.copy(manual = manual.copy(index = next, outcomes = outcomes)) }
+            return
+        }
+
+        // 走完了：收摊，把汇总交给「全部签到」那套弹窗 —— 两种方式的结果长得一样，
+        // 用户不必学两套
+        _state.update {
+            it.copy(
+                accounts = repo.all(),
+                manual = null,
+                checkIn = CheckInProgress(manual.queue.size, manual.queue.size, outcomes),
+            )
+        }
+        val ok = outcomes.count { !it.result.isFailure }
+        showMessage("手动签到完成：$ok / ${outcomes.size} 个账号成功")
+    }
+
+    /** 用户主动跳过当前这个。 */
+    fun skipManual() = reportManual(CasClient.CheckInResult.Skipped("手动跳过"))
+
+    /** 中途退出，不看汇总。 */
+    fun dismissManual() {
+        _state.update { it.copy(manual = null) }
+    }
+
+    /**
+     * 取某个账号的 Cookie，用于注入 WebView。
+     *
+     * 返回 okhttp `Cookie.toString()` 的形状（`name=value; path=/; domain=…`），
+     * 正好就是 `android.webkit.CookieManager.setCookie` 认的格式。
+     */
+    fun webCookies(username: String): List<String> = repo.cookiesOf(username).map { it.toString() }
 
     // ------------------------------------------------------------------ 删除
 
