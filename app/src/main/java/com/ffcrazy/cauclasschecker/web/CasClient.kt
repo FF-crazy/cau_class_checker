@@ -105,7 +105,8 @@ class CasClient {
                 val request = Request.Builder()
                     .url(entry.toHttpUrl())
                     .post(body)
-                    .header("User-Agent", USER_AGENT)
+                    .asBrowser("same-origin")
+                    .header("Origin", originOf(entry))
                     .header("Referer", entry)
                     .build()
 
@@ -153,7 +154,7 @@ class CasClient {
                 val http = httpWith(AccountCookieJar(cookies))
                 val request = Request.Builder()
                     .url(CasLogin.SERVICE_ROOT.toHttpUrl())
-                    .header("User-Agent", USER_AGENT)
+                    .asBrowser("none")
                     .build()
                 http.newCall(request).execute().use { response ->
                     if (response.request.url.host.equals(CasLogin.CAS_HOST, ignoreCase = true)) {
@@ -258,7 +259,8 @@ class CasClient {
                 val request = Request.Builder()
                     .url(form.action.toHttpUrl())
                     .post(body)
-                    .header("User-Agent", USER_AGENT)
+                    .asBrowser("same-origin")
+                    .header("Origin", originOf(form.action))
                     // 正常流程是表单页提交过来的，带上来源更像真实请求
                     .header("Referer", url)
                     .build()
@@ -322,13 +324,48 @@ class CasClient {
         else -> "登录出错：${e.message ?: e::class.java.simpleName}"
     }
 
+    /**
+     * 给请求补上真实浏览器会带的那一组头。
+     *
+     * 起因是一条实测对比：**同一个 ipt、同一个签到窗口**，浏览器打开
+     * `casgeosig.php` 拿到的是 `casgeoreg.php?…&pst=113&pict=…`，
+     * 我们用 OkHttp 拿到的却是光秃秃的 `reg.php?ip=…&ipt=…`。
+     * 时间相同、会话相同，差别只剩「请求长什么样」—— 而我们原来只发了
+     * 一个简写 UA，`Accept` / `Accept-Language` / `Sec-Fetch-*` 一个都没有。
+     *
+     * 端点由服务端选，我们改不了它的逻辑，只能让它看起来是同一个浏览器。
+     *
+     * [fetchSite] 按浏览器的语义填：地址栏直接打开是 `none`，
+     * 从页面里提交表单是 `same-origin`。
+     *
+     * **不设 Accept-Encoding**：OkHttp 会自己加 gzip 并自动解压，
+     * 手工写 br / zstd 反而会让它拿到解不开的内容。
+     */
+    private fun Request.Builder.asBrowser(fetchSite: String): Request.Builder = apply {
+        header("User-Agent", USER_AGENT)
+        header(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        )
+        header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+        header("Upgrade-Insecure-Requests", "1")
+        header("Sec-Fetch-Dest", "document")
+        header("Sec-Fetch-Mode", "navigate")
+        header("Sec-Fetch-Site", fetchSite)
+        header("Sec-Fetch-User", "?1")
+    }
+
+    /** `https://host` —— Origin 头只要这一段。 */
+    private fun originOf(url: String): String =
+        url.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}" }.orEmpty()
+
     /** 响应体 + 最终 URL。最终 URL 用来判断有没有被 CAS 踢回去。 */
     private data class Page(val finalUrl: String, val body: String)
 
     private fun get(http: OkHttpClient, url: String): Page {
         val request = Request.Builder()
             .url(url.toHttpUrl())
-            .header("User-Agent", USER_AGENT)
+            .asBrowser("none")
             .build()
         return http.newCall(request).execute().use {
             Page(it.request.url.toString(), it.body?.string().orEmpty())
@@ -336,8 +373,16 @@ class CasClient {
     }
 
     private companion object {
+        /**
+         * 真实的手机 Chrome UA。
+         *
+         * 之前那个是简写版，缺了设备型号、`(KHTML, like Gecko)` 和完整四段版本号。
+         * 服务端要是拿 UA 判断「这是什么浏览器」，简写版很可能落到「不认识」那一支上 ——
+         * 而实测同一场签到里，同样的会话换个客户端就能拿到不同的登记表单端点。
+         */
         const val USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+            "Mozilla/5.0 (Linux; Android 14; 2211133C) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
     }
 }
 
