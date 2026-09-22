@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.CookieJar
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
@@ -27,7 +28,7 @@ sealed interface LoginResult {
 }
 
 /**
- * 统一身份认证的无头登录客户端。
+ * 统一身份认证的无头登录 + 签到客户端。
  *
  * ```
  * 1. GET  /tpass/login?service=<站点根>   → 抓 lt 与 execution
@@ -155,14 +156,12 @@ class CasClient {
     /**
      * 一次签到的结果。
      *
-     * 每个分支都带 [detail]（服务端返回的原文摘要）—— 因为**我并不知道
-     * `casgeosig.php` 成功/失败时分别返回什么**，只能按关键词做尽力而为的判断，
-     * 认不出来时把原文交给用户，而不是猜一个结论。
+     * 每个分支都带 [detail]：能判出来时是给用户看的中文说明，判不出来时是服务端原文。
      */
     sealed interface CheckInResult {
         val detail: String
 
-        /** 服务端说成功了。 */
+        /** 服务端说「签到成功」。 */
         data class Success(override val detail: String) : CheckInResult
 
         /** 这个账号已经签过了。不算失败，但要说清楚。 */
@@ -171,7 +170,7 @@ class CasClient {
         /** 登录态失效，被踢回了 CAS —— 需要重新登录这个账号。 */
         data class LoginExpired(override val detail: String) : CheckInResult
 
-        /** 服务端明确拒绝（码过期、参数不对等）。 */
+        /** 服务端明确拒绝（码过期、参数不对、签到会话超时等）。 */
         data class Rejected(override val detail: String) : CheckInResult
 
         /** 认不出来的响应。把原文给用户看。 */
@@ -182,68 +181,79 @@ class CasClient {
 
         data class Network(override val detail: String) : CheckInResult
 
-        /** 是否算「签到没成」，界面据此显示红/灰。 */
+        /** 是否算「签到没成」，界面据此显示红/绿。 */
         val isFailure: Boolean
             get() = this is LoginExpired || this is Rejected || this is Network || this is NoSession
     }
 
     /**
-     * 用某个账号**自己的** Cookie 发起一次签到。
+     * 用某个账号**自己的** Cookie 完成一次签到。
      *
-     * 每个账号调用一次，各自独立 —— 这正是分开存 Cookie 换来的能力。
+     * ## 签到是两步，不是一步
+     * 实测（对着线上真实请求验证过）：
+     *
+     * ```
+     * ① GET  casgeosig.php?ip&ipt&t&tt   带该账号的 Cookie
+     *    ├─ 未登录       → 302 到 onecas.cau.edu.cn/tpass/login
+     *    ├─ t 取值不合法 → 200 + "…请重新扫描签到的二维码…"
+     *    └─ 通过         → 200 + 一张 <form>，同时服务端 $_SESSION['LastVisit'] 被种下
+     *
+     * ② POST 表单 action（reg.php 或 casgeoreg.php，从页面里解析，见 [RegForm]）
+     *    ├─ 没有 LastVisit → "LastVisit timeout! Please Scan the QRcode again"
+     *    └─ 有            → "签到结果 … 签到成功 …"
+     * ```
+     *
+     * **只发第一步不会签上任何人** —— 它只取回一张表单。第二步必须在 120 秒内完成，
+     * 那正是服务端给 LastVisit 的有效期。
+     *
      * [url] 由调用方在**发请求前一刻**生成，因为 `t` 是按秒滚动的，
      * 提前批量生成会让靠后的账号拿到过期的码。
      */
     suspend fun checkIn(cookies: List<StoredCookie>, url: String): CheckInResult =
         withContext(Dispatchers.IO) {
             try {
+                // 两步必须共用同一个罐子：LastVisit 是跟着会话走的
                 val http = httpWith(AccountCookieJar(cookies))
+
+                // ---- 第一步：取登记表单 ----
+                val page = get(http, url)
+                if (page.finalUrl.toHttpUrlOrNull()?.host.equals(CasLogin.CAS_HOST, true)) {
+                    return@withContext CheckInResult.LoginExpired(
+                        "被跳回统一身份认证，这个账号需要重新登录",
+                    )
+                }
+
+                val form = RegForm.parse(page.body, page.finalUrl)
+                    ?: return@withContext classifyCheckIn(plainText(page.body))
+
+                // ---- 第二步：原样提交回 action ----
+                val builder = FormBody.Builder()
+                form.fields.forEach { (k, v) -> builder.add(k, v) }
+                // 这两个字段实测服务端不校验（填占位值照样签到成功）。
+                // 但**留空会触发页面脚本的拦截逻辑**，所以补个非空占位。
+                if (form.fields["position"].isNullOrEmpty()) builder.add("position", NO_GEOLOCATION)
+                if (form.fields["browserfp"].isNullOrEmpty()) builder.add("browserfp", NO_FINGERPRINT)
+
                 val request = Request.Builder()
-                    .url(url.toHttpUrl())
+                    .url(form.action.toHttpUrl())
+                    .post(builder.build())
                     .header("User-Agent", USER_AGENT)
-                    // 正常流程是从签到页点进来的，带上来源更像真实请求
-                    .header("Referer", CasLogin.SERVICE_ROOT)
+                    // 正常流程是表单页提交过来的，带上来源更像真实请求
+                    .header("Referer", url)
                     .build()
 
                 http.newCall(request).execute().use { response ->
-                    // 被踢回 CAS = 这个账号的登录态没了
                     if (response.request.url.host.equals(CasLogin.CAS_HOST, ignoreCase = true)) {
-                        return@use CheckInResult.LoginExpired("登录态已失效")
+                        return@use CheckInResult.LoginExpired(
+                            "被跳回统一身份认证，这个账号需要重新登录",
+                        )
                     }
-                    val text = plainText(response.body?.string().orEmpty())
-                    classify(text)
+                    classifyCheckIn(plainText(response.body?.string().orEmpty()))
                 }
             } catch (e: Exception) {
                 CheckInResult.Network(networkMessage(e))
             }
         }
-
-    /**
-     * 按关键词判断签到结果。
-     *
-     * ⚠️ 这是**尽力而为**的启发式：我没见过真实响应。所以顺序很重要 ——
-     * 「已签到」要先于「签到成功」判断（「您已签到成功」同时含两个关键词，
-     * 但它其实是重复签到）。认不出来一律归为 [CheckInResult.Unknown] 并附上原文，
-     * 由人来看，而不是硬猜。
-     */
-    private fun classify(text: String): CheckInResult = when {
-        text.isBlank() -> CheckInResult.Unknown("（服务端返回了空内容）")
-        text.contains("已签到") || text.contains("重复签到") ->
-            CheckInResult.AlreadyDone(text)
-        text.contains("成功") -> CheckInResult.Success(text)
-        text.contains("过期") || text.contains("失效") || text.contains("超时") ->
-            CheckInResult.Rejected(text)
-        text.contains("失败") || text.contains("错误") || text.contains("无效") ->
-            CheckInResult.Rejected(text)
-        else -> CheckInResult.Unknown(text)
-    }
-
-    /** 去掉标签与多余空白，截断到可展示的长度。 */
-    private fun plainText(html: String): String =
-        html.replace(TAG_REGEX, " ")
-            .replace(WHITESPACE_REGEX, " ")
-            .trim()
-            .take(160)
 
     // ------------------------------------------------------------------ 错误诊断
 
@@ -286,7 +296,7 @@ class CasClient {
         else -> "登录出错：${e.message ?: e::class.java.simpleName}"
     }
 
-    /** 响应体 + 最终 URL。最终 URL 用来判断有没有被 CAS 直接放行。 */
+    /** 响应体 + 最终 URL。最终 URL 用来判断有没有被 CAS 踢回去。 */
     private data class Page(val finalUrl: String, val body: String)
 
     private fun get(http: OkHttpClient, url: String): Page {
@@ -303,7 +313,64 @@ class CasClient {
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
 
-        val TAG_REGEX = Regex("<[^>]+>")
-        val WHITESPACE_REGEX = Regex("\\s+")
+        /** 页面脚本要求 position 非空才允许提交；服务端并不校验它的内容。 */
+        const val NO_GEOLOCATION = "1,User denied Geolocation"
+
+        /** 同理。真实值是 FingerprintJS 的 visitorId，我们造不出来，也不需要。 */
+        val NO_FINGERPRINT: String = "0".repeat(32)
     }
 }
+
+// ---------------------------------------------------------------------- 结果判定
+
+/**
+ * 按关键词判断签到结果。
+ *
+ * 下面这些字符串全部是**对着线上真实响应实测**得到的，不是猜的：
+ *
+ * ```
+ * 成功   签到结果 学号:… 姓名:… 签到成功 课堂:…:… 时间: 2026-09-22 18:37:36
+ * 拒绝   <服务端时间>, 如果您在教室，请重新扫描签到的二维码，…
+ * 超时   LastVisit timeout! Please Scan the QRcode again
+ * 缺参   GET[t] not set! Please Scan the QR code
+ * ```
+ *
+ * 顺序要紧：**「已签到」必须排在「签到成功」前面**，因为重复签到时服务端很可能
+ * 同时说出这两层意思，而那次其实是重复签到。
+ * 认不出来的一律归为 [CasClient.CheckInResult.Unknown] 并附上原文，由人来看，不硬猜。
+ */
+internal fun classifyCheckIn(text: String): CasClient.CheckInResult = when {
+    text.isBlank() -> CasClient.CheckInResult.Unknown("（服务端返回了空内容）")
+
+    text.contains("已签到") || text.contains("重复签到") ->
+        CasClient.CheckInResult.AlreadyDone(text)
+
+    text.contains("签到成功") -> CasClient.CheckInResult.Success(text)
+
+    // LastVisit 超时是**签到这一步**太慢了，跟账号登录态无关，
+    // 所以归 Rejected 而不是 LoginExpired —— 不能因此把账号标成失效。
+    text.contains("LastVisit timeout") ->
+        CasClient.CheckInResult.Rejected("签到会话超时了（两步之间隔了太久），请重新扫码再试")
+
+    text.contains("重新扫描") -> CasClient.CheckInResult.Rejected(text)
+
+    text.contains("GET[t] not set") ->
+        CasClient.CheckInResult.Rejected("链接里缺少 t 参数，不是有效的签到链接")
+
+    else -> CasClient.CheckInResult.Unknown(text)
+}
+
+/** 先整块删掉 script / style —— 否则 CSS 正文会挤掉后面真正的内容。 */
+private val BLOCK_REGEX = Regex("(?is)<(script|style)\\b[^>]*>.*?</\\1\\s*>")
+private val COMMENT_REGEX = Regex("(?s)<!--.*?-->")
+private val TAG_REGEX = Regex("<[^>]+>")
+private val WHITESPACE_REGEX = Regex("\\s+")
+
+/** 去掉脚本样式、标签与多余空白，截断到可展示的长度。 */
+internal fun plainText(html: String): String =
+    html.replace(BLOCK_REGEX, " ")
+        .replace(COMMENT_REGEX, " ")
+        .replace(TAG_REGEX, " ")
+        .replace(WHITESPACE_REGEX, " ")
+        .trim()
+        .take(200)
